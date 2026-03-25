@@ -8,9 +8,9 @@ Generates compact **trace files** that capture cache block patterns from real Cl
 
 ## Key Discovery
 
-Claude Code sends **two requests per turn**:
-- **Streaming** (`max_tokens=32000`) — for real-time UI responsiveness
-- **Non-streaming** (`max_tokens=21333`) — for tool execution, 5-8 seconds later
+Claude Code sends **two requests per tool call**:
+- **Streaming** — for real-time UI display
+- **Non-streaming** — for tool execution, 5-8 seconds later
 
 Both have identical content. The non-streaming request gets ~100% cache hit from the streaming request's cache creation. This means half of all API traffic is essentially free.
 

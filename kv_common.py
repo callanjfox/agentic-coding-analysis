@@ -30,7 +30,7 @@ def get_tokenizer():
 def classify_request(body_str: str) -> str:
     """Classify request type based on stream flag and max_tokens.
 
-    Claude Code sends two requests per turn:
+    Claude Code sends two requests per tool call:
     - Streaming: stream=True (for UI responsiveness)
     - Non-streaming: stream=False/None (for tool execution)
 

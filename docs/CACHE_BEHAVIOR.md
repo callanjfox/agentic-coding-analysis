@@ -55,7 +55,7 @@ total_input = input_tokens + cache_read_input_tokens + cache_creation_input_toke
 
 ## Streaming / Non-Streaming Request Pairing
 
-Claude Code sends **two requests per turn** with identical content:
+Claude Code sends **two requests per tool call** with identical content:
 
 | Order | Type | max_tokens | stream | Purpose |
 |-------|------|-----------|--------|---------|
