@@ -8,6 +8,7 @@
 
 # Generated HTML visualizations
 *.html
+!examples/visualizations/*.html
 
 # Conversation data
 *.jsonl
@@ -22,7 +23,7 @@ new_traces*/
 synthetic*/
 real_data*/
 test_output*/
-visualizations*/
+/visualizations*/
 viz/
 reports/
 request_dbs/

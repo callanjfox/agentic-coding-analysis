@@ -44,6 +44,11 @@ This single prompt generated **185 API requests** across 4 sub-agents in ~17 min
 **Included files:**
 - `examples/requests.db` — Full API request/response database from [claude-code-proxy](https://github.com/seifghazi/claude-code-proxy)
 - `examples/jsonl/` — JSONL conversation files from Claude Code's local storage (1 parent + 4 sub-agent files)
+- `examples/visualizations/` — Pre-generated interactive HTML charts (open in browser):
+  - `combined_combined.html` — Combined dashboard with all cache metrics
+  - `combined_ttl.html` — TTL impact analysis across different cache lifetimes
+  - `combined_working_set.html` — Working set size over time
+  - `combined_stats.txt` — Full text statistics
 
 ## Quick Start
 
