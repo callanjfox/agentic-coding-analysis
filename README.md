@@ -2,7 +2,7 @@
 
 Tools for analyzing and simulating Claude's prompt caching behavior. Achieves **95-97% accuracy** against actual API cache metrics.
 
-This project was created as part of research at [WEKA](https://www.weka.io/) to understand how Claude Code's KV cache behaves in real-world conversations — specifically how cache hit rates evolve over time, how TTL affects cache reuse, and what the working set looks like across different conversation patterns. The visualization tools (`complete_cache_visualizer.py`) were built to answer these questions, and the trace generation pipeline packages this data for replay testing on real storage infrastructure.
+This project was created as part of my product management work at [WEKA](https://www.weka.io/) on the [Augmented Memory Grid](https://www.weka.io/resources/solution-brief/weka-augmented-memory-grid/) product that I lead. I needed to understand how Claude Code's KV cache behaves in real-world conversations — specifically how cache hit rates evolve over time, how TTL affects cache reuse, and what the working set looks like across different conversation patterns. The visualization tools (`complete_cache_visualizer.py`) were built to answer these questions, and the trace generation pipeline packages this data for replay testing on real storage infrastructure.
 
 Generates compact **trace files** that capture cache block patterns from real Claude Code sessions. These traces feed into [kv-cache-tester](https://github.com/callanjfox/kv-cache-tester) for replay testing against live infrastructure.
 
