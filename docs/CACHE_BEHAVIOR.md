@@ -123,14 +123,18 @@ The 3-10 uncached tokens are just the user's specific input text. The entire ~72
 
 ### Impact on Simulation
 
-Our simulation only models within-conversation caching. The global cache creates a ~1.9 percentage point gap:
+Our simulation only models within-conversation caching. Three factors contribute to the ~1.9 percentage point gap:
 
 | Metric | With Infinite TTL | API Actual |
 |--------|-------------------|------------|
 | Simulated avg | ~97.7% | ~99.6% |
 | Gap | — | ~1.9pp |
 
-This gap is expected and correct — it represents a real cross-session benefit that cannot be simulated without modeling the global cache.
+**1. Cross-conversation global cache (~1-2pp)** — The global cache keeps the shared prefix warm across sessions, which our per-conversation simulation cannot model.
+
+**2. Tokenizer differences** — We use tiktoken's GPT-4 tokenizer as an approximation. Claude's actual tokenizer produces slightly different token boundaries, causing minor block alignment mismatches.
+
+**3. Full-block rounding** — We only simulate full 64-token blocks, discarding partial remainders (0-63 tokens per request). The API caches at a finer granularity, so our block-level simulation systematically undercounts cached tokens by a small amount.
 
 ## TTL Behavior
 

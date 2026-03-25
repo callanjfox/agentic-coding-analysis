@@ -2,6 +2,8 @@
 
 Tools for analyzing and simulating Claude's prompt caching behavior. Achieves **95-97% accuracy** against actual API cache metrics.
 
+This project was created to understand how Claude Code's KV cache behaves in real-world conversations — specifically how cache hit rates evolve over time, how TTL affects cache reuse, and what the working set looks like across different conversation patterns. The visualization tools (`complete_cache_visualizer.py`) were built to answer these questions, and the trace generation pipeline packages this data for replay testing on real storage infrastructure.
+
 Generates compact **trace files** that capture cache block patterns from real Claude Code sessions. These traces feed into [kv-cache-tester](https://github.com/callanjfox/kv-cache-tester) for replay testing against live infrastructure.
 
 ## Key Discovery
@@ -205,7 +207,13 @@ Cache hits are prefix-based: if block N misses, all subsequent blocks also miss.
 
 ### Why ~1.9% Gap Between Simulation and API
 
-Our simulation is correct for within-conversation prefix matching. The API achieves ~1.9 percentage points higher because it has a **global cache** shared across all Claude Code sessions. Tool definitions (~12K tokens) and system prompt (~3K tokens) are always warm from other active sessions, so even the first request of a new conversation gets ~100% cache hit.
+Three factors contribute to the gap between our simulated cache rate and the API's actual rate:
+
+1. **Cross-conversation global cache** (~1-2pp) — The API has a global cache shared across all Claude Code sessions. Tool definitions (~12K tokens) and system prompt (~3K tokens) are always warm from other active sessions, so even the first request of a new conversation gets ~100% cache hit.
+
+2. **Tokenizer differences** — We use tiktoken's GPT-4 tokenizer as an approximation. Claude's actual tokenizer produces slightly different token boundaries, which can cause minor mismatches in block alignment.
+
+3. **Full-block rounding** — We only simulate full 64-token blocks, discarding the partial remainder (0-63 tokens per request). The API caches at a finer granularity, so our simulation systematically undercounts by a small amount.
 
 ## Integration with kv-cache-tester
 
