@@ -1,0 +1,50 @@
+# Data files (large, not for public repo)
+*.db
+*.db-journal
+*.db.*
+*.pkl
+*.csv
+
+# Generated HTML visualizations
+*.html
+
+# Conversation data
+*.jsonl
+jsonl/
+recovered_jsonl*/
+
+# Generated output
+traces/
+new_traces*/
+synthetic*/
+real_data*/
+test_output*/
+visualizations*/
+viz/
+reports/
+request_dbs/
+
+# Generated indexes
+message_id_index.json
+conversation_id_mapping.json
+
+# Log files
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
