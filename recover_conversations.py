@@ -175,17 +175,15 @@ class ConversationRecoverer:
         return normalized
 
     def classify_request(self, body_str: str) -> str:
-        """Classify request type based on max_tokens and stream flag"""
+        """Classify request type based on stream flag."""
         body = json.loads(body_str)
-        max_tokens = body.get('max_tokens', 0)
-        stream = body.get('stream', False)
+        stream = body.get('stream')
 
-        if max_tokens == 32000 and stream:
+        if stream is True:
             return 'streaming'
-        elif max_tokens in [21333, 21334, 21332]:
+        elif stream is False or stream is None:
             return 'non_streaming'
-        else:
-            return 'unknown'
+        return 'unknown'
 
     def extract_hashes(self, body_str: str) -> Tuple[str, str, str]:
         """Extract tool_hash, sys_hash, and content_hash from request body

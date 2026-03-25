@@ -28,24 +28,34 @@ def get_tokenizer():
 
 
 def classify_request(body_str: str) -> str:
-    """Classify request type based on max_tokens and stream flag.
+    """Classify request type based on stream flag and max_tokens.
 
     Claude Code sends two requests per turn:
-    - Streaming: max_tokens=32000, stream=True (for UI responsiveness)
-    - Non-streaming: max_tokens~=21333, stream=False (for tool execution)
+    - Streaming: stream=True (for UI responsiveness)
+    - Non-streaming: stream=False/None (for tool execution)
+
+    Handles both old format (max_tokens=32000/21333) and new format
+    (same max_tokens, stream=True vs stream=None).
 
     Returns: 'streaming', 'non_streaming', or 'unknown'
     """
     body = json.loads(body_str)
     max_tokens = body.get('max_tokens', 0)
-    stream = body.get('stream', False)
+    stream = body.get('stream')
 
-    if max_tokens == 32000 and stream:
+    # Primary: use stream flag (works with both old and new proxy formats)
+    if stream is True:
         return 'streaming'
-    elif max_tokens in [21333, 21334, 21332]:
-        return 'non_streaming'
-    else:
-        return 'unknown'
+    elif stream is False or stream is None:
+        # Old format: non-streaming had max_tokens ~21333
+        # New format: non-streaming has stream=None with same max_tokens
+        if max_tokens in [21333, 21334, 21332]:
+            return 'non_streaming'
+        elif stream is None and max_tokens > 0:
+            return 'non_streaming'
+        elif stream is False:
+            return 'non_streaming'
+    return 'unknown'
 
 
 def normalize_for_cache(obj: Any) -> Any:

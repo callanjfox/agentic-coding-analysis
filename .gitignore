@@ -2,6 +2,7 @@
 *.db
 *.db-journal
 *.db.*
+!examples/requests.db
 *.pkl
 *.csv
 

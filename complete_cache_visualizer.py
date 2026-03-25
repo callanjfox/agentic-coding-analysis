@@ -266,17 +266,15 @@ class CompleteCacheSimulator:
         return analysis
 
 def classify_request(body_str: str) -> str:
-    """Classify request type"""
+    """Classify request type based on stream flag."""
     body = json.loads(body_str)
-    max_tokens = body.get('max_tokens', 0)
-    stream = body.get('stream', False)
+    stream = body.get('stream')
 
-    if max_tokens == 32000 and stream:
+    if stream is True:
         return 'streaming'
-    elif max_tokens in [21333, 21334, 21332]:
+    elif stream is False or stream is None:
         return 'non_streaming'
-    else:
-        return 'unknown'
+    return 'unknown'
 
 def format_preview_text(text: str, max_line_length: int = 100) -> str:
     """Format preview text preserving original newlines but wrapping long lines"""

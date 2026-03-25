@@ -22,6 +22,21 @@ See [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) for details on how these two so
 
 **Planned:** Claude Enterprise admin log console (direct API log ingestion without the proxy).
 
+## Example Database
+
+An example `requests.db` is included at `examples/requests.db` containing a single Claude Code conversation with 4 sub-agents:
+
+| Metric | Value |
+|--------|-------|
+| Total requests | 185 |
+| Streaming / Non-streaming | 92 / 93 |
+| Models | claude-opus-4-6, claude-haiku-4-5 |
+| Duration | ~17 minutes |
+| Total tokens processed | 7.7M |
+| Cache hit rate | 93.3% |
+| Cache read tokens | 7.2M |
+| Cache create tokens | 413K |
+
 ## Quick Start
 
 ### Prerequisites
@@ -30,14 +45,36 @@ See [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) for details on how these two so
 pip install -r requirements.txt
 ```
 
-### Setup (one-time per database)
+### Try it with the example database
+
+```bash
+# Recover conversations from the example DB (no JSONL files needed)
+python3 recover_conversations.py examples/requests.db \
+    --output-dir examples/recovered_jsonl/
+
+# Generate traces
+python3 build_minimal_traces.py examples/requests.db \
+    --jsonl-dir examples/recovered_jsonl/ \
+    --output-dir examples/traces/ \
+    --block-size 64 \
+    --include-subagents
+
+# Validate traces against API metrics
+python3 validate_trace_cache.py examples/traces/ \
+    --db examples/requests.db \
+    --jsonl-dir examples/recovered_jsonl/
+```
+
+### Full workflow with your own data
+
+#### Setup (one-time per database)
 
 ```bash
 python3 build_message_index.py requests.db
 python3 build_conversation_index.py requests.db
 ```
 
-### Analyze a Conversation
+#### Analyze a Conversation
 
 ```bash
 # Interactive HTML visualization
@@ -50,7 +87,7 @@ python3 complete_cache_analyzer.py requests.db --conversation-id <uuid>
 python3 list_conversations.py requests.db
 ```
 
-### Generate Traces
+#### Generate Traces
 
 ```bash
 # Generate traces from all conversations
@@ -70,7 +107,7 @@ python3 build_minimal_traces.py requests.db \
     --include-subagents
 ```
 
-### Validate Traces Against API Metrics
+#### Validate Traces Against API Metrics
 
 ```bash
 python3 validate_trace_cache.py traces/ \
@@ -78,7 +115,7 @@ python3 validate_trace_cache.py traces/ \
     --jsonl-dir jsonl/
 ```
 
-### Recover Conversations (when JSONL files are missing)
+#### Recover Conversations (when JSONL files are missing)
 
 ```bash
 # IMPORTANT: Always use --exclude-indexed to avoid duplicating

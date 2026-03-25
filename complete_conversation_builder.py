@@ -30,17 +30,16 @@ class RequestInfo:
     paired_with: Optional[str] = None
 
 def classify_request(body_str: str) -> Tuple[str, int, bool]:
-    """Classify request as streaming or non-streaming"""
+    """Classify request as streaming or non-streaming."""
     body = json.loads(body_str)
     max_tokens = body.get('max_tokens', 0)
-    stream = body.get('stream', False)
+    stream = body.get('stream')
 
-    if max_tokens == 32000 and stream:
-        return 'streaming', max_tokens, stream
-    elif max_tokens in [21333, 21334, 21332]:  # Allow small variation
-        return 'non_streaming', max_tokens, stream
-    else:
-        return 'unknown', max_tokens, stream
+    if stream is True:
+        return 'streaming', max_tokens, True
+    elif stream is False or stream is None:
+        return 'non_streaming', max_tokens, False
+    return 'unknown', max_tokens, bool(stream)
 
 def extract_hashes(body_str: str) -> Tuple[str, str, str, int]:
     """Extract content hashes and message count"""

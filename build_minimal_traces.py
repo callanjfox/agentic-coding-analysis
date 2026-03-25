@@ -284,17 +284,19 @@ class MinimalTraceBuilder:
 
 
 def classify_request(body_str: str) -> str:
-    """Classify request type based on max_tokens and stream flag"""
-    body = json.loads(body_str)
-    max_tokens = body.get('max_tokens', 0)
-    stream = body.get('stream', False)
+    """Classify request type based on stream flag.
 
-    if max_tokens == 32000 and stream:
+    Handles both old format (max_tokens=32000/21333) and new format
+    (same max_tokens, stream=True vs stream=None).
+    """
+    body = json.loads(body_str)
+    stream = body.get('stream')
+
+    if stream is True:
         return 'streaming'
-    elif max_tokens in [21333, 21334, 21332]:
+    elif stream is False or stream is None:
         return 'non_streaming'
-    else:
-        return 'unknown'
+    return 'unknown'
 
 
 def compact_json(obj) -> str:
