@@ -13,6 +13,8 @@
 *.jsonl
 jsonl/
 recovered_jsonl*/
+!examples/jsonl/
+!examples/jsonl/*.jsonl
 
 # Generated output
 traces/

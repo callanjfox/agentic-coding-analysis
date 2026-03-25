@@ -22,9 +22,13 @@ See [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) for details on how these two so
 
 **Planned:** Claude Enterprise admin log console (direct API log ingestion without the proxy).
 
-## Example Database
+## Example Data
 
-An example `requests.db` is included at `examples/requests.db` containing a single Claude Code conversation with 4 sub-agents:
+The `examples/` directory contains a complete working example: one Claude Code conversation where the user asked:
+
+> *"Can you clone a version of vllm locally and then fully analyze its full code path and write me a markdown file about key components."*
+
+This single prompt generated **185 API requests** across 4 sub-agents in ~17 minutes, processing **7.7 million tokens** with a 93.3% cache hit rate.
 
 | Metric | Value |
 |--------|-------|
@@ -32,10 +36,14 @@ An example `requests.db` is included at `examples/requests.db` containing a sing
 | Streaming / Non-streaming | 92 / 93 |
 | Models | claude-opus-4-6, claude-haiku-4-5 |
 | Duration | ~17 minutes |
+| Sub-agents spawned | 4 (Explore agents) |
 | Total tokens processed | 7.7M |
 | Cache hit rate | 93.3% |
 | Cache read tokens | 7.2M |
-| Cache create tokens | 413K |
+
+**Included files:**
+- `examples/requests.db` — Full API request/response database from [claude-code-proxy](https://github.com/seifghazi/claude-code-proxy)
+- `examples/jsonl/` — JSONL conversation files from Claude Code's local storage (1 parent + 4 sub-agent files)
 
 ## Quick Start
 
@@ -45,24 +53,32 @@ An example `requests.db` is included at `examples/requests.db` containing a sing
 pip install -r requirements.txt
 ```
 
-### Try it with the example database
+### Try it with the example data
 
 ```bash
-# Recover conversations from the example DB (no JSONL files needed)
-python3 recover_conversations.py examples/requests.db \
-    --output-dir examples/recovered_jsonl/
+# 1. Setup: build indexes linking JSONL to DB
+python3 build_message_index.py examples/requests.db
+python3 build_conversation_index.py examples/requests.db --projects-path examples/jsonl/
 
-# Generate traces
+# 2. Generate traces with sub-agents
 python3 build_minimal_traces.py examples/requests.db \
-    --jsonl-dir examples/recovered_jsonl/ \
+    --jsonl-dir examples/jsonl/ \
     --output-dir examples/traces/ \
     --block-size 64 \
     --include-subagents
 
-# Validate traces against API metrics
+# 3. Validate traces against actual API cache metrics
 python3 validate_trace_cache.py examples/traces/ \
     --db examples/requests.db \
-    --jsonl-dir examples/recovered_jsonl/
+    --jsonl-dir examples/jsonl/
+```
+
+Expected output from validation:
+```
+02f3098e-6bc (16 reqs, 6 matched)
+  Simulated: 85.8% (5,681/6,625 blocks)
+  API:       94.3% (210,961/223,791 tokens)
+  Accuracy:  91.0%
 ```
 
 ### Full workflow with your own data
