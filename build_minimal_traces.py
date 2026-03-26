@@ -415,20 +415,22 @@ def process_conversation(conn, conversation_id: str, jsonl_path: Path, msg_id_ma
         ORDER BY timestamp
     """, (range_start, range_end)).fetchall()
 
-    # Extract tool/system hashes for matching
-    def extract_hashes(body_str: str) -> Tuple[str, str]:
+    # Extract tool/system/content hashes for matching
+    def extract_hashes(body_str: str) -> Tuple[str, str, str]:
         body = json.loads(body_str)
         tools = body.get('tools', [])
         system = body.get('system', [])
+        messages = body.get('messages', [])
         tool_hash = hashlib.md5(json.dumps(tools, separators=(',', ':')).encode()).hexdigest()[:16]
         sys_hash = hashlib.md5(json.dumps(system, separators=(',', ':')).encode()).hexdigest()[:16]
-        return tool_hash, sys_hash
+        msg_hash = hashlib.md5(json.dumps(messages, separators=(',', ':')).encode()).hexdigest()[:16]
+        return tool_hash, sys_hash, msg_hash
 
     # Get hashes from indexed requests
     indexed_info = []
     for req_id, ts_str, body_str, resp_str in indexed_reqs:
-        tool_hash, sys_hash = extract_hashes(body_str)
-        indexed_info.append((req_id, ts_str, tool_hash, sys_hash))
+        tool_hash, sys_hash, msg_hash = extract_hashes(body_str)
+        indexed_info.append((req_id, ts_str, tool_hash, sys_hash, msg_hash))
 
     # Find all conversation requests (indexed + streaming pairs)
     conversation_reqs = []
@@ -439,14 +441,14 @@ def process_conversation(conn, conversation_id: str, jsonl_path: Path, msg_id_ma
             conversation_reqs.append((req_id, ts_str, body_str, resp_str))
             continue
 
-        # Check if this is a streaming pair
-        tool_hash, sys_hash = extract_hashes(body_str)
+        # Check if this is a streaming pair (must match content, not just tools/system)
+        tool_hash, sys_hash, msg_hash = extract_hashes(body_str)
 
-        for idx_id, idx_ts, idx_tool_hash, idx_sys_hash in indexed_info:
+        for idx_id, idx_ts, idx_tool_hash, idx_sys_hash, idx_msg_hash in indexed_info:
             idx_dt = datetime.fromisoformat(idx_ts.replace('Z', '+00:00'))
             gap = abs((ts - idx_dt).total_seconds())
 
-            if gap < 30 and tool_hash == idx_tool_hash and sys_hash == idx_sys_hash:
+            if gap < 30 and msg_hash == idx_msg_hash:
                 conversation_reqs.append((req_id, ts_str, body_str, resp_str))
                 break
 
@@ -742,20 +744,22 @@ def process_subagent(conn, agent_id: str, subagent_index: Dict[str, Dict],
         ORDER BY timestamp
     """, (range_start, range_end)).fetchall()
 
-    # Extract tool/system hashes for matching
-    def extract_hashes(body_str: str) -> Tuple[str, str]:
+    # Extract tool/system/content hashes for matching
+    def extract_hashes(body_str: str) -> Tuple[str, str, str]:
         body = json.loads(body_str)
         tools = body.get('tools', [])
         system = body.get('system', [])
+        messages = body.get('messages', [])
         tool_hash = hashlib.md5(json.dumps(tools, separators=(',', ':')).encode()).hexdigest()[:16]
         sys_hash = hashlib.md5(json.dumps(system, separators=(',', ':')).encode()).hexdigest()[:16]
-        return tool_hash, sys_hash
+        msg_hash = hashlib.md5(json.dumps(messages, separators=(',', ':')).encode()).hexdigest()[:16]
+        return tool_hash, sys_hash, msg_hash
 
     # Get hashes from indexed requests
     indexed_info = []
     for req_id, ts_str, body_str, resp_str in indexed_reqs:
-        tool_hash, sys_hash = extract_hashes(body_str)
-        indexed_info.append((req_id, ts_str, tool_hash, sys_hash))
+        tool_hash, sys_hash, msg_hash = extract_hashes(body_str)
+        indexed_info.append((req_id, ts_str, tool_hash, sys_hash, msg_hash))
 
     # Find all sub-agent requests (indexed + streaming pairs)
     subagent_reqs = []
@@ -766,14 +770,14 @@ def process_subagent(conn, agent_id: str, subagent_index: Dict[str, Dict],
             subagent_reqs.append((req_id, ts_str, body_str, resp_str))
             continue
 
-        # Check if this is a streaming pair
-        tool_hash, sys_hash = extract_hashes(body_str)
+        # Check if this is a streaming pair (must match content, not just tools/system)
+        tool_hash, sys_hash, msg_hash = extract_hashes(body_str)
 
-        for idx_id, idx_ts, idx_tool_hash, idx_sys_hash in indexed_info:
+        for idx_id, idx_ts, idx_tool_hash, idx_sys_hash, idx_msg_hash in indexed_info:
             idx_dt = datetime.fromisoformat(idx_ts.replace('Z', '+00:00'))
             gap = abs((ts - idx_dt).total_seconds())
 
-            if gap < 30 and tool_hash == idx_tool_hash and sys_hash == idx_sys_hash:
+            if gap < 30 and msg_hash == idx_msg_hash:
                 subagent_reqs.append((req_id, ts_str, body_str, resp_str))
                 break
 
