@@ -97,23 +97,22 @@ class CompleteCacheSimulator:
         self.cached_requests: List[CachedRequest] = []  # For TTL analysis
 
     def normalize_body(self, body):
-        """Remove cache_control markers recursively for cache key calculation"""
+        """Remove cache_control and signature markers recursively for cache key calculation"""
         import copy
         normalized = copy.deepcopy(body)
 
-        def remove_cache_control(obj):
-            """Recursively remove cache_control from nested structures"""
+        def remove_markers(obj):
+            """Recursively remove cache_control and signature from nested structures"""
             if isinstance(obj, dict):
-                # Remove cache_control if present
                 obj.pop('cache_control', None)
-                # Recurse into nested objects
+                obj.pop('signature', None)
                 for value in obj.values():
-                    remove_cache_control(value)
+                    remove_markers(value)
             elif isinstance(obj, list):
                 for item in obj:
-                    remove_cache_control(item)
+                    remove_markers(item)
 
-        remove_cache_control(normalized)
+        remove_markers(normalized)
         return normalized
 
     def extract_all_tokens(self, body):
@@ -331,20 +330,21 @@ def analyze_message_breakdown(body: dict) -> tuple:
     return (user_text, tool_use, tool_result, assistant)
 
 def normalize_for_cache(body: dict) -> dict:
-    """Remove cache_control markers recursively"""
+    """Remove cache_control and signature markers recursively"""
     import copy
     normalized = copy.deepcopy(body)
 
-    def remove_cache_control(obj):
+    def remove_markers(obj):
         if isinstance(obj, dict):
             obj.pop('cache_control', None)
+            obj.pop('signature', None)
             for value in obj.values():
-                remove_cache_control(value)
+                remove_markers(value)
         elif isinstance(obj, list):
             for item in obj:
-                remove_cache_control(item)
+                remove_markers(item)
 
-    remove_cache_control(normalized)
+    remove_markers(normalized)
     return normalized
 
 def extract_message_segments(body: dict, tokenizer) -> List[MessageSegment]:
@@ -1721,51 +1721,54 @@ def process_single_conversation(args, conversation_id: str, output_file: str):
     )
     print()  # New line after progress
 
-    # Create visualizations
-    # Simple prompt visualizations
-    fig_simple = create_cache_visualization(sim.analyses)
-    simple_file = output_file.replace('.html', '_simple_prompt.html')
-    fig_simple.write_html(simple_file)
+    # Create visualizations (skip if --text-only)
+    text_only = getattr(args, 'text_only', False)
 
-    fig_simple_skinny = create_cache_visualization_skinny(sim.analyses)
-    simple_skinny_file = output_file.replace('.html', '_simple_prompt_skinny.html')
-    fig_simple_skinny.write_html(simple_skinny_file)
+    if not text_only:
+        # Simple prompt visualizations
+        fig_simple = create_cache_visualization(sim.analyses)
+        simple_file = output_file.replace('.html', '_simple_prompt.html')
+        fig_simple.write_html(simple_file)
 
-    # Detailed prompt visualizations (message breakdown)
-    fig_detailed = create_detailed_cache_visualization(sim.analyses)
-    detailed_file = output_file.replace('.html', '_detailed_prompt.html')
-    fig_detailed.write_html(detailed_file)
+        fig_simple_skinny = create_cache_visualization_skinny(sim.analyses)
+        simple_skinny_file = output_file.replace('.html', '_simple_prompt_skinny.html')
+        fig_simple_skinny.write_html(simple_skinny_file)
 
-    fig_detailed_skinny = create_detailed_cache_visualization_skinny(sim.analyses)
-    detailed_skinny_file = output_file.replace('.html', '_detailed_prompt_skinny.html')
-    fig_detailed_skinny.write_html(detailed_skinny_file)
+        # Detailed prompt visualizations (message breakdown)
+        fig_detailed = create_detailed_cache_visualization(sim.analyses)
+        detailed_file = output_file.replace('.html', '_detailed_prompt.html')
+        fig_detailed.write_html(detailed_file)
 
-    fig_ttl = create_ttl_graph(ttl_results)
-    ttl_file = output_file.replace('.html', '_ttl.html')
-    fig_ttl.write_html(ttl_file)
+        fig_detailed_skinny = create_detailed_cache_visualization_skinny(sim.analyses)
+        detailed_skinny_file = output_file.replace('.html', '_detailed_prompt_skinny.html')
+        fig_detailed_skinny.write_html(detailed_skinny_file)
 
-    # Create TTL graph with working set (always generated)
-    fig_ttl_workingset = create_ttl_with_workingset_graph(ttl_results, max_working_set)
-    ttl_workingset_file = output_file.replace('.html', '_ttl_workingset.html')
-    fig_ttl_workingset.write_html(ttl_workingset_file)
+        fig_ttl = create_ttl_graph(ttl_results)
+        ttl_file = output_file.replace('.html', '_ttl.html')
+        fig_ttl.write_html(ttl_file)
 
-    # Create churn rate graphs
-    fig_ttl_churnrate_cachehit = create_ttl_churnrate_cachehit_graph(ttl_results, churn_rates)
-    ttl_churnrate_cachehit_file = output_file.replace('.html', '_ttl_churnrate_cachehit.html')
-    fig_ttl_churnrate_cachehit.write_html(ttl_churnrate_cachehit_file)
+        # Create TTL graph with working set (always generated)
+        fig_ttl_workingset = create_ttl_with_workingset_graph(ttl_results, max_working_set)
+        ttl_workingset_file = output_file.replace('.html', '_ttl_workingset.html')
+        fig_ttl_workingset.write_html(ttl_workingset_file)
 
-    fig_ttl_churnrate_workingset = create_ttl_churnrate_workingset_graph(churn_rates, max_working_set)
-    ttl_churnrate_workingset_file = output_file.replace('.html', '_ttl_churnrate_workingset.html')
-    fig_ttl_churnrate_workingset.write_html(ttl_churnrate_workingset_file)
+        # Create churn rate graphs
+        fig_ttl_churnrate_cachehit = create_ttl_churnrate_cachehit_graph(ttl_results, churn_rates)
+        ttl_churnrate_cachehit_file = output_file.replace('.html', '_ttl_churnrate_cachehit.html')
+        fig_ttl_churnrate_cachehit.write_html(ttl_churnrate_cachehit_file)
 
-    fig_working_set = create_working_set_graph(working_set_timeseries)
-    working_set_file = output_file.replace('.html', '_working_set.html')
-    fig_working_set.write_html(working_set_file)
+        fig_ttl_churnrate_workingset = create_ttl_churnrate_workingset_graph(churn_rates, max_working_set)
+        ttl_churnrate_workingset_file = output_file.replace('.html', '_ttl_churnrate_workingset.html')
+        fig_ttl_churnrate_workingset.write_html(ttl_churnrate_workingset_file)
 
-    # NEW: Combined working set + hit rate graph
-    fig_combined = create_working_set_with_hit_rate_graph(working_set_timeseries, hit_rate_timeseries)
-    combined_file = output_file.replace('.html', '_combined.html')
-    fig_combined.write_html(combined_file)
+        fig_working_set = create_working_set_graph(working_set_timeseries)
+        working_set_file = output_file.replace('.html', '_working_set.html')
+        fig_working_set.write_html(working_set_file)
+
+        # NEW: Combined working set + hit rate graph
+        fig_combined = create_working_set_with_hit_rate_graph(working_set_timeseries, hit_rate_timeseries)
+        combined_file = output_file.replace('.html', '_combined.html')
+        fig_combined.write_html(combined_file)
 
     # Write statistics file
     stats_file = output_file.replace('.html', '_stats.txt')
@@ -1907,11 +1910,13 @@ def process_single_conversation(args, conversation_id: str, output_file: str):
         'working_set_1hour': max_working_set[3600],
         'working_set_24hour': max_working_set[86400],
         'files': {
-            'cache': output_file,
-            'ttl': ttl_file,
-            'working_set': working_set_file,
-            'combined': combined_file,
-            'stats': stats_file
+            'stats': stats_file,
+            **({}  if text_only else {
+                'cache': output_file,
+                'ttl': ttl_file,
+                'working_set': working_set_file,
+                'combined': combined_file,
+            })
         }
     }
 
@@ -1927,6 +1932,7 @@ def main():
     parser.add_argument('--output-dir', help='Output directory for batch mode')
     parser.add_argument('--newest', action='store_true', help='Process newest conversations first (for --conversation-id all)')
     parser.add_argument('--skip-long-ttls', action='store_true', help='Skip 72h TTL analysis')
+    parser.add_argument('--text-only', action='store_true', help='Skip HTML chart generation, only output stats text')
     parser.add_argument('--interpolation-interval', type=int, default=15, help='Minutes between interpolation points (default: 15)')
     args = parser.parse_args()
 
@@ -1959,11 +1965,8 @@ def main():
             print(f"  24 hr:  {result['working_set_24hour']:,} tokens")
             print()
             print(f"Files generated:")
-            print(f"  - {result['files']['cache']}")
-            print(f"  - {result['files']['ttl']}")
-            print(f"  - {result['files']['working_set']}")
-            print(f"  - {result['files']['combined']}")
-            print(f"  - {result['files']['stats']}")
+            for f in result['files'].values():
+                print(f"  - {f}")
 
     elif args.conversation_id == 'all':
         # Batch mode
@@ -2064,11 +2067,8 @@ def main():
             print(f"Cache hit rate (5-min TTL): {result['cache_hit_rate']*100:.1f}%")
             print()
             print(f"Files generated:")
-            print(f"  - {result['files']['cache']}")
-            print(f"  - {result['files']['ttl']}")
-            print(f"  - {result['files']['working_set']}")
-            print(f"  - {result['files']['combined']}")
-            print(f"  - {result['files']['stats']}")
+            for f in result['files'].values():
+                print(f"  - {f}")
 
 if __name__ == "__main__":
     main()

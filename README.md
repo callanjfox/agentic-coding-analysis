@@ -103,8 +103,8 @@ python3 build_conversation_index.py requests.db
 # Interactive HTML visualization
 python3 complete_cache_visualizer.py requests.db --conversation-id <uuid> --output viz.html
 
-# Text-only analysis (faster)
-python3 complete_cache_analyzer.py requests.db --conversation-id <uuid>
+# Text-only stats (no charts, faster)
+python3 complete_cache_visualizer.py requests.db --conversation-id <uuid> --output stats.html --text-only
 
 # List available conversations
 python3 list_conversations.py requests.db
@@ -156,8 +156,7 @@ python3 recover_conversations.py requests.db \
 | `build_minimal_traces.py` | Generate compact traces with hash_ids for cache replay |
 | `validate_trace_cache.py` | Validate trace cache simulation against actual API metrics |
 | `recover_conversations.py` | Recover conversation structure from DB when JSONL missing |
-| `complete_cache_visualizer.py` | Interactive HTML cache behavior visualizations |
-| `complete_cache_analyzer.py` | Text-only cache analysis (no plotly dependency) |
+| `complete_cache_visualizer.py` | Cache analysis with interactive HTML charts (use `--text-only` for stats only) |
 | `complete_conversation_builder.py` | Build complete request timelines with streaming pair matching |
 | `build_message_index.py` | One-time setup: extract message IDs from responses |
 | `build_conversation_index.py` | One-time setup: link JSONL conversations to DB requests |

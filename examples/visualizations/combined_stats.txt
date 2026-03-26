@@ -7,9 +7,9 @@ Total Requests: 184
   Non-streaming: 92
 
 INPUT TOKENS (5-minute TTL simulation):
-  Simulated Total:    7,414,747
-    Cache Read:       7,019,415 (94.7%)
-    Cache Creation:   395,332 (5.3%)
+  Simulated Total:    7,410,170
+    Cache Read:       7,015,924 (94.7%)
+    Cache Creation:   394,246 (5.3%)
     Input (new):      0 (0.0%)
 
   API Actual Total:   7,717,076
@@ -18,12 +18,12 @@ INPUT TOKENS (5-minute TTL simulation):
     Input (new):      104,077 (1.3%)
 
   Comparison:
-    Total Accuracy:   96.1%
-    Cache Read Accuracy: 97.5%
+    Total Accuracy:   96.0%
+    Cache Read Accuracy: 97.4%
 
 OUTPUT TOKENS:
   Total: 74,611
-  Input/Output Ratio: 99.4:1
+  Input/Output Ratio: 99.3:1
 
 MODEL USAGE:
   claude-haiku-4-5-20251001:
@@ -32,11 +32,11 @@ MODEL USAGE:
     Output tokens: 50,037
   claude-opus-4-6:
     Requests: 13
-    Input tokens: 469,106
+    Input tokens: 464,529
     Output tokens: 24,574
 
 CONTEXT LENGTH (tokens per request):
-  Mean: 40,298
+  Mean: 40,273
   25th percentile: 14,174
   50th percentile: 38,684 (median)
   75th percentile: 62,275
@@ -44,7 +44,7 @@ CONTEXT LENGTH (tokens per request):
   Maximum: 88,834
 
   Incremental Growth (tokens added per turn):
-    Mean: 4,560
+    Mean: 4,553
     25th percentile: 731
     50th percentile: 2,325 (median)
     75th percentile: 6,962
@@ -59,18 +59,18 @@ TIME BETWEEN REQUESTS:
   90th percentile: 3.0 seconds
 
 TTL ANALYSIS (cache hit rates, working set, & prefill count):
-  1 minute:   93.3% hit, 283,374 tokens, 1.43 prefill (86.1% stable)
-  2 minutes:  93.8% hit, 324,301 tokens, 1.32 prefill (86.1% stable)
-  3 minutes:  94.4% hit, 325,646 tokens, 1.20 prefill (86.1% stable)
-  4 minutes:  94.7% hit, 326,069 tokens, 1.14 prefill (86.1% stable)
-  5 minutes:  94.7% hit, 326,080 tokens, 1.14 prefill (86.1% stable)
-  10 minutes: 95.3% hit, 334,207 tokens, 1.00 prefill (100.0% stable)
-  15 minutes: 95.3% hit, 346,756 tokens, 1.00 prefill (100.0% stable)
-  30 minutes: 95.3% hit, 346,756 tokens, 1.00 prefill (100.0% stable)
-  1 hour:     95.3% hit, 346,756 tokens, 1.00 prefill (100.0% stable)
-  2 hours:    95.3% hit, 346,756 tokens, 1.00 prefill (100.0% stable)
-  4 hours:    95.3% hit, 346,756 tokens, 1.00 prefill (100.0% stable)
-  8 hours:    95.3% hit, 346,756 tokens, 1.00 prefill (100.0% stable)
-  24 hours:   95.3% hit, 346,756 tokens, 1.00 prefill (100.0% stable)
+  1 minute:   93.3% hit, 283,374 tokens, 1.43 prefill (86.2% stable)
+  2 minutes:  93.8% hit, 323,910 tokens, 1.32 prefill (86.2% stable)
+  3 minutes:  94.4% hit, 325,255 tokens, 1.20 prefill (86.2% stable)
+  4 minutes:  94.7% hit, 325,664 tokens, 1.14 prefill (86.2% stable)
+  5 minutes:  94.7% hit, 325,675 tokens, 1.14 prefill (86.2% stable)
+  10 minutes: 95.3% hit, 333,795 tokens, 1.00 prefill (100.0% stable)
+  15 minutes: 95.3% hit, 346,054 tokens, 1.00 prefill (100.0% stable)
+  30 minutes: 95.3% hit, 346,054 tokens, 1.00 prefill (100.0% stable)
+  1 hour:     95.3% hit, 346,054 tokens, 1.00 prefill (100.0% stable)
+  2 hours:    95.3% hit, 346,054 tokens, 1.00 prefill (100.0% stable)
+  4 hours:    95.3% hit, 346,054 tokens, 1.00 prefill (100.0% stable)
+  8 hours:    95.3% hit, 346,054 tokens, 1.00 prefill (100.0% stable)
+  24 hours:   95.3% hit, 346,054 tokens, 1.00 prefill (100.0% stable)
 
 ================================================================================

@@ -22,8 +22,8 @@ python3 complete_cache_visualizer.py requests.db --conversation-id <uuid> --outp
 # Batch analysis
 python3 complete_cache_visualizer.py requests.db --conversation-id all --output-dir visualizations/
 
-# Text-only (faster, no plotly needed)
-python3 complete_cache_analyzer.py requests.db --conversation-id <uuid>
+# Text-only stats (no charts, faster)
+python3 complete_cache_visualizer.py requests.db --conversation-id <uuid> --text-only
 ```
 
 ### Trace Generation
