@@ -50,13 +50,19 @@ class MinimalTraceBuilder:
     across requests - the last partial chunk would always change as content grows.
     """
 
-    def __init__(self, block_size: int = 256):
+    def __init__(self, block_size: int = 256, shared_hash_state: dict = None):
         self.block_size = block_size
         self.tokenizer = tiktoken.encoding_for_model("gpt-4")
 
         # Hash management - assigns numeric IDs to unique hashes
-        self.hash_to_id: Dict[str, int] = {}
-        self.next_hash_id = 1
+        # When shared_hash_state is provided, all builders share the same
+        # mapping, making hash_ids globally consistent across conversations
+        if shared_hash_state is not None:
+            self.hash_to_id = shared_hash_state['hash_to_id']
+            self._shared_counter = shared_hash_state
+        else:
+            self.hash_to_id: Dict[str, int] = {}
+            self._shared_counter = {'hash_to_id': self.hash_to_id, 'next_id': 1}
 
         # Results
         self.records: List[Dict] = []
@@ -77,8 +83,8 @@ class MinimalTraceBuilder:
     def get_hash_id(self, chunk_hash: str) -> int:
         """Get or create numeric ID for a hash"""
         if chunk_hash not in self.hash_to_id:
-            self.hash_to_id[chunk_hash] = self.next_hash_id
-            self.next_hash_id += 1
+            self.hash_to_id[chunk_hash] = self._shared_counter['next_id']
+            self._shared_counter['next_id'] += 1
         return self.hash_to_id[chunk_hash]
 
     def create_chained_hash(self, token_ids: List[int], prev_hash: str, seq_num: int) -> str:
@@ -273,6 +279,7 @@ class MinimalTraceBuilder:
             "id": conversation_id[:12],
             "models": sorted(self.models),
             "block_size": self.block_size,
+            "hash_id_scope": "global",
             "tool_tokens": self.tool_tokens,
             "system_tokens": self.system_tokens,
             "requests": self.records
@@ -366,7 +373,7 @@ def build_message_id_map(conn) -> Dict[str, str]:
     return msg_id_map
 
 
-def process_conversation(conn, conversation_id: str, jsonl_path: Path, msg_id_map: Dict[str, str], args) -> Optional[Dict]:
+def process_conversation(conn, conversation_id: str, jsonl_path: Path, msg_id_map: Dict[str, str], args, shared_hash_state: dict = None) -> Optional[Dict]:
     """Process a single conversation from JSONL + database"""
 
     # Get message IDs from JSONL
@@ -486,7 +493,7 @@ def process_conversation(conn, conversation_id: str, jsonl_path: Path, msg_id_ma
         if len(segment) < args.min_requests:
             continue
 
-        builder = MinimalTraceBuilder(args.block_size)
+        builder = MinimalTraceBuilder(args.block_size, shared_hash_state=shared_hash_state)
 
         for req_id, ts_str, body_str, resp_str in segment:
             ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
@@ -685,7 +692,7 @@ def enrich_links_with_subagent_type(links: List[Dict], jsonl_dir: Path) -> List[
 
 
 def process_subagent(conn, agent_id: str, subagent_index: Dict[str, Dict],
-                     msg_id_map: Dict[str, str], args) -> Optional[Dict]:
+                     msg_id_map: Dict[str, str], args, shared_hash_state: dict = None) -> Optional[Dict]:
     """
     Process a sub-agent conversation and return its trace.
 
@@ -788,7 +795,7 @@ def process_subagent(conn, agent_id: str, subagent_index: Dict[str, Dict],
     subagent_reqs.sort(key=lambda x: x[1])
 
     # Build trace for sub-agent
-    builder = MinimalTraceBuilder(args.block_size)
+    builder = MinimalTraceBuilder(args.block_size, shared_hash_state=shared_hash_state)
 
     for req_id, ts_str, body_str, resp_str in subagent_reqs:
         ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
@@ -808,7 +815,8 @@ def process_subagent(conn, agent_id: str, subagent_index: Dict[str, Dict],
 def process_conversation_with_subagents(conn, conversation_id: str, jsonl_path: Path,
                                         msg_id_map: Dict[str, str], args,
                                         subagent_index: Dict[str, Dict],
-                                        parent_links: List[Dict]) -> Optional[List[Dict]]:
+                                        parent_links: List[Dict],
+                                        shared_hash_state: dict = None) -> Optional[List[Dict]]:
     """
     Process a conversation with sub-agents embedded.
 
@@ -818,7 +826,7 @@ def process_conversation_with_subagents(conn, conversation_id: str, jsonl_path: 
     3. Insert sub-agent traces at their spawn points in the parent trace
     """
     # First, get the parent trace using existing logic
-    traces = process_conversation(conn, conversation_id, jsonl_path, msg_id_map, args)
+    traces = process_conversation(conn, conversation_id, jsonl_path, msg_id_map, args, shared_hash_state=shared_hash_state)
 
     if not traces:
         return None
@@ -890,7 +898,7 @@ def process_conversation_with_subagents(conn, conversation_id: str, jsonl_path: 
                 continue
 
             # Process the sub-agent
-            subagent_trace = process_subagent(conn, agent_id, subagent_index, msg_id_map, args)
+            subagent_trace = process_subagent(conn, agent_id, subagent_index, msg_id_map, args, shared_hash_state=shared_hash_state)
             if not subagent_trace:
                 continue
 
@@ -1012,6 +1020,10 @@ def main():
         print(f"  Found {len(parent_links)} sub-agent links")
         print()
 
+    # Shared hash state across all conversations in this batch run
+    # Makes hash_ids globally consistent: same content = same ID
+    shared_hash_state = {'hash_to_id': {}, 'next_id': 1}
+
     # Find JSONL files (exclude agent-* files from main processing)
     jsonl_files = [f for f in jsonl_dir.glob("*.jsonl") if not f.name.startswith("agent-")]
     print(f"Found {len(jsonl_files)} parent conversation JSONL files in {jsonl_dir}")
@@ -1031,10 +1043,10 @@ def main():
         if args.include_subagents:
             traces = process_conversation_with_subagents(
                 conn, args.conversation_id, jsonl_path, msg_id_map, args,
-                subagent_index, parent_links
+                subagent_index, parent_links, shared_hash_state=shared_hash_state
             )
         else:
-            traces = process_conversation(conn, args.conversation_id, jsonl_path, msg_id_map, args)
+            traces = process_conversation(conn, args.conversation_id, jsonl_path, msg_id_map, args, shared_hash_state=shared_hash_state)
 
         if traces:
             for i, trace in enumerate(traces):
@@ -1069,10 +1081,10 @@ def main():
             if args.include_subagents:
                 traces = process_conversation_with_subagents(
                     conn, conv_id, jsonl_path, msg_id_map, args,
-                    subagent_index, parent_links
+                    subagent_index, parent_links, shared_hash_state=shared_hash_state
                 )
             else:
-                traces = process_conversation(conn, conv_id, jsonl_path, msg_id_map, args)
+                traces = process_conversation(conn, conv_id, jsonl_path, msg_id_map, args, shared_hash_state=shared_hash_state)
 
             if traces:
                 for trace in traces:

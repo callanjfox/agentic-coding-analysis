@@ -79,6 +79,18 @@ def build_msg_id_to_usage_map(conn, message_ids: List[str]) -> Dict[str, Dict]:
     return usage_map
 
 
+def _flatten_trace_requests(requests: list) -> list:
+    """Flatten sub-agent nested requests into a single timeline."""
+    result = []
+    for req in requests:
+        if req.get('type') == 'subagent':
+            for sub_req in req.get('requests', []):
+                result.append(sub_req)
+        else:
+            result.append(req)
+    return sorted(result, key=lambda r: r.get('t', 0))
+
+
 def simulate_cache_from_trace(trace: Dict, ttl_seconds: int = None) -> Tuple[int, int, float]:
     """Simulate cache from trace hash_ids.
 
@@ -89,10 +101,19 @@ def simulate_cache_from_trace(trace: Dict, ttl_seconds: int = None) -> Tuple[int
     total_blocks = 0
     cache_hits = 0
 
+    # For global hash_id scope, flatten sub-agent requests into timeline
+    # (their hash_ids are consistent with parent)
+    scope = trace.get('hash_id_scope', 'per_context')
+    if scope == 'global':
+        requests = _flatten_trace_requests(trace.get('requests', []))
+    else:
+        # Legacy: skip sub-agent requests (hash_ids would collide)
+        requests = [r for r in trace.get('requests', []) if r.get('type') != 'subagent']
+
     if ttl_seconds is None:
         # Infinite TTL - simple set-based tracking
         cache = set()
-        for req in trace.get('requests', []):
+        for req in requests:
             hash_ids = req.get('hash_ids', [])
             hits = sum(1 for h in hash_ids if h in cache)
             cache.update(hash_ids)
@@ -101,7 +122,7 @@ def simulate_cache_from_trace(trace: Dict, ttl_seconds: int = None) -> Tuple[int
     else:
         # Finite TTL - track expiry times
         cache = {}  # hash_id -> expiry_time
-        for req in trace.get('requests', []):
+        for req in requests:
             t = req.get('t', 0)
             hash_ids = req.get('hash_ids', [])
             hits = sum(1 for h in hash_ids if h in cache and cache[h] > t)
