@@ -1011,6 +1011,28 @@ def process_conversation_with_subagents(conn, conversation_id: str, jsonl_path: 
     return traces
 
 
+def anonymize_trace(trace: Dict, trace_number: int) -> Dict:
+    """Anonymize a trace by replacing identifying information.
+
+    Replaces:
+    - id with trace_NNNN
+    - _start_ts stripped
+    - _analysis stripped
+    - Sub-agent agent_ids with agent_NNN
+    """
+    trace['id'] = f"trace_{trace_number:04d}"
+    trace.pop('_start_ts', None)
+    trace.pop('_analysis', None)
+
+    agent_counter = 0
+    for req in trace.get('requests', []):
+        if req.get('type') == 'subagent':
+            agent_counter += 1
+            req['agent_id'] = f"agent_{agent_counter:03d}"
+
+    return trace
+
+
 def main():
     parser = argparse.ArgumentParser(description='Build minimal traces from real conversations')
     parser.add_argument('db', help='Path to requests.db')
@@ -1024,6 +1046,8 @@ def main():
                         help='Split conversation when gap exceeds N seconds (e.g., 86400 for 1 day)')
     parser.add_argument('--include-subagents', action='store_true', default=False,
                         help='Include sub-agent traces nested inside parent traces')
+    parser.add_argument('--anonymize', action='store_true', default=False,
+                        help='Anonymize traces: replace IDs with sequential numbers, strip timestamps')
     args = parser.parse_args()
 
     jsonl_dir = Path(args.jsonl_dir)
@@ -1082,6 +1106,8 @@ def main():
 
         if traces:
             for i, trace in enumerate(traces):
+                if args.anonymize:
+                    trace = anonymize_trace(trace, i + 1)
                 trace_id = trace['id']
                 if args.output:
                     # For splits, add segment number to filename
@@ -1096,7 +1122,7 @@ def main():
                     f.write(compact_json(trace))
                 print(f"Written: {output_path}")
                 print(f"  Requests: {len(trace['requests'])}")
-                print(f"  Unique blocks: {trace['_analysis']['unique_blocks']}")
+                print(f"  Unique blocks: {trace.get('_analysis', {}).get('unique_blocks', '?')}")
         else:
             print("  No matching requests found")
     else:
@@ -1121,6 +1147,8 @@ def main():
             if traces:
                 for trace in traces:
                     processed += 1
+                    if args.anonymize:
+                        trace = anonymize_trace(trace, processed)
                     trace_id = trace['id']
                     if args.output_dir:
                         output_path = os.path.join(args.output_dir, f"{trace_id[:16]}.json")
@@ -1131,10 +1159,11 @@ def main():
                     trace_subagents = sum(1 for r in trace.get('requests', []) if r.get('type') == 'subagent')
                     subagent_total += trace_subagents
 
+                    unique_blocks = trace.get('_analysis', {}).get('unique_blocks', '?')
                     if args.include_subagents and trace_subagents > 0:
-                        print(f"  {trace_id}: {len(trace['requests'])} items ({trace_subagents} subagents), {trace['_analysis']['unique_blocks']} blocks")
+                        print(f"  {trace_id}: {len(trace['requests'])} items ({trace_subagents} subagents), {unique_blocks} blocks")
                     else:
-                        print(f"  {trace_id}: {len(trace['requests'])} requests, {trace['_analysis']['unique_blocks']} blocks")
+                        print(f"  {trace_id}: {len(trace['requests'])} requests, {unique_blocks} blocks")
             else:
                 skipped += 1
 
