@@ -72,6 +72,7 @@ class MinimalTraceBuilder:
         self.prev_stop_reason: Optional[str] = None
         self.prev_req_type: Optional[str] = None
         self.prev_hash_ids: List[int] = []
+        self.prev_completed_at: Optional[datetime] = None  # For think_time calculation
 
         # Models used (track all unique models in conversation)
         self.models: set = set()
@@ -141,14 +142,19 @@ class MinimalTraceBuilder:
         # Return sorted for consistency
         return sorted(content_types)
 
-    def extract_response_info(self, response_str: Optional[str]) -> Tuple[int, str, List[str]]:
-        """Extract output_tokens, stop_reason, and output content types from response"""
+    def extract_response_info(self, response_str: Optional[str]) -> Tuple[int, str, List[str], Optional[float], Optional[str]]:
+        """Extract output_tokens, stop_reason, output content types, and timing from response.
+
+        Returns: (output_tokens, stop_reason, output_types, api_time_secs, completed_at_iso)
+        """
         output_tokens = 0
         stop_reason = ""
         output_types = []
+        api_time_secs = None
+        completed_at_iso = None
 
         if not response_str:
-            return output_tokens, stop_reason, output_types
+            return output_tokens, stop_reason, output_types, api_time_secs, completed_at_iso
 
         try:
             resp = json.loads(response_str)
@@ -169,10 +175,16 @@ class MinimalTraceBuilder:
                             types_set.add(block_type)
                 output_types = sorted(types_set)
 
+            # Extract timing from proxy envelope (if available)
+            response_time_ms = resp.get('responseTime')
+            if response_time_ms is not None:
+                api_time_secs = response_time_ms / 1000.0
+            completed_at_iso = resp.get('completedAt')
+
         except Exception:
             pass
 
-        return output_tokens, stop_reason, output_types
+        return output_tokens, stop_reason, output_types, api_time_secs, completed_at_iso
 
     def process_request(self, ts: datetime, body_str: str, response_str: Optional[str], req_type: str):
         """Process one request and add to records"""
@@ -217,8 +229,22 @@ class MinimalTraceBuilder:
             hash_ids.append(hash_id)
             prev_hash = chunk_hash
 
-        # Get response info (output)
-        output_tokens, stop_reason, output_types = self.extract_response_info(response_str)
+        # Get response info (output + timing)
+        output_tokens, stop_reason, output_types, api_time_secs, completed_at_iso = self.extract_response_info(response_str)
+
+        # Compute think_time: gap between previous response completing and this request being sent
+        think_time = None
+        if self.prev_completed_at is not None:
+            think_time = max(0.0, (ts - self.prev_completed_at).total_seconds())
+        elif self.start_ts == ts:
+            think_time = 0.0  # First request
+
+        # Track completion time for next request's think_time
+        if completed_at_iso:
+            try:
+                self.prev_completed_at = datetime.fromisoformat(completed_at_iso.replace('Z', '+00:00'))
+            except (ValueError, AttributeError):
+                pass
 
         # Determine what the CLIENT added this request (not cumulative history)
         req_type_short = "s" if req_type == "streaming" else ("n" if req_type == "non_streaming" else "?")
@@ -264,6 +290,12 @@ class MinimalTraceBuilder:
             "output_types": output_types,  # What Claude returned: ["thinking", "text", "tool_use"]
             "stop": stop_reason
         }
+
+        # Add timing breakdown (if available from proxy response)
+        if api_time_secs is not None:
+            record["api_time"] = round(api_time_secs, 2)
+        if think_time is not None:
+            record["think_time"] = round(think_time, 2)
 
         # Update tracking for next request
         self.prev_stop_reason = stop_reason
