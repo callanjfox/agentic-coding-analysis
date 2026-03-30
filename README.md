@@ -43,6 +43,8 @@ This single prompt generated **185 API requests** across 4 sub-agents in ~17 min
 | Cache hit rate | 93.3% |
 | Cache read tokens | 7.2M |
 
+See [docs/EXAMPLE_CONVERSATION.md](docs/EXAMPLE_CONVERSATION.md) for a detailed request-by-request walkthrough of this conversation — showing how the cache builds up, how sub-agents share their tool prefix, and why cache rates change at each phase.
+
 **Included files:**
 - `examples/requests.db` — Full API request/response database from [claude-code-proxy](https://github.com/seifghazi/claude-code-proxy)
 - `examples/jsonl/` — JSONL conversation files from Claude Code's local storage (1 parent + 4 sub-agent files)
