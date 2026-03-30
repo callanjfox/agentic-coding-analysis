@@ -1,5 +1,23 @@
 # CLAUDE.md
 
+## Repository Layout
+
+This is the **agentic-coding-analysis** repo (`github.com/callanjfox/agentic-coding-analysis`).
+
+The companion repo is **kv-cache-tester** (`github.com/callanjfox/kv-cache-tester`) — the trace replay tester that consumes traces generated here.
+
+Local working directories:
+```
+/mnt/weka/kv-analysis/repos/agentic-coding-analysis/   # this repo
+/mnt/weka/kv-analysis/repos/kv-cache-tester/            # companion repo
+```
+
+Generated trace data:
+```
+/mnt/weka/kv-analysis/traces_v6/anonymized/             # 270 traces (JSONL-based only)
+/mnt/weka/kv-analysis/traces_v6/anonymized_recovered/   # 522 traces (JSONL + recovered)
+```
+
 ## Project Overview
 
 Tools for analyzing Claude's prompt caching behavior using request data from [claude-code-proxy](https://github.com/seifghazi/claude-code-proxy) and JSONL conversation files from Claude Code's local storage.
@@ -34,7 +52,7 @@ python3 build_minimal_traces.py requests.db \
     --block-size 64 \
     --min-requests 5 \
     --include-subagents \
-    --split-at-gap 43200
+    --anonymize
 ```
 
 ### Trace Validation
@@ -55,6 +73,13 @@ python3 recover_conversations.py requests.db \
 **Current:** `requests.db` (from claude-code-proxy) + JSONL files (from `~/.claude/projects/`)
 **Future:** Claude Enterprise admin log console
 
+## Key Features
+
+- **Global hash_ids**: Shared across all conversations in a batch — enables cross-conversation cache simulation
+- **Timing breakdown**: `api_time` (server processing) and `think_time` (client delay) per request
+- **Sub-agent support**: Nested sub-agent traces with isolated cache contexts
+- **Anonymization**: `--anonymize` strips conversation IDs, timestamps, and agent IDs
+
 ## Architecture
 
 ### Cache Simulation
@@ -63,13 +88,13 @@ python3 recover_conversations.py requests.db \
 - Hash: SHA256 chained (each block depends on previous)
 - Normalization: removes `cache_control` and `signature` fields
 
-### Two Requests Per Turn
-Claude Code sends streaming (`max_tokens=32000`) then non-streaming (`max_tokens=21333`) with identical content. Non-streaming gets ~100% cache hit.
+### Two Requests Per Tool Call
+Claude Code sends streaming then non-streaming with identical content. Non-streaming gets ~100% cache hit.
 
 ### Key Accuracy Numbers
-- Simulation: ~97.7% cache hit rate (infinite TTL)
-- API actual: ~99.6%
-- Gap: ~1.9pp (cross-conversation global cache)
+- Simulation: ~95.4% cache hit rate (with global hash_ids, sub-agents included)
+- API actual: ~94.3%
+- Gap: eliminated with global hash_ids
 
 ## Dependencies
 
