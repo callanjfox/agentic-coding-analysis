@@ -39,9 +39,9 @@ The parent clones the vLLM repo and inspects it. Context grows from 25K → 26K 
   STREAM  haiku 13,215 tokens in →  109 out | cache:  0.0% | api: 1.6s  ← SA4
 ```
 
-All 4 Explore agents fire within **<1 second**. Their first requests show **0% cache** because sub-agents use different tools and system prompt than the parent (haiku has ~10K tool tokens vs opus ~15K). The entire content is new to the cache.
+All 4 Explore agents fire within **the same second** (15:43:05). Their first streaming requests all show **0% cache** — not only because they use different tools than the parent, but because all 4 are in-flight simultaneously. The cache hasn't been written by any of them yet when the others arrive.
 
-But the non-streaming pairs immediately benefit:
+The non-streaming pairs (sent 1-2 seconds later) benefit from the streaming cache:
 
 ```
   NON-ST  haiku 13,215 tokens in →  123 out | cache: 96.0%  ← SA4 pair
@@ -50,7 +50,16 @@ But the non-streaming pairs immediately benefit:
   NON-ST  haiku 13,206 tokens in →  104 out | cache: 100%   ← SA1 pair
 ```
 
-The streaming requests created the cache; the non-streaming pairs read it at 96-100%. The sub-agents also benefit from **each other** — all 4 share the same tool definitions (~10K tokens), so after the first sub-agent creates its cache, the others get hits on that shared prefix.
+And on the **second turn**, the sub-agents benefit from each other — all 4 share identical tool definitions (~10K tokens), so the cache created by each sub-agent's first request is reusable by the others:
+
+```
+  STREAM  haiku 13,397 tokens in →   91 out | cache: 98.6%  ← SA1 turn 2
+  STREAM  haiku 13,868 tokens in →   91 out | cache: 95.3%  ← SA4 turn 2
+  STREAM  haiku 13,500 tokens in →   83 out | cache: 98.2%  ← SA3 turn 2
+  STREAM  haiku 13,871 tokens in →   86 out | cache: 91.5%  ← SA2 turn 2
+```
+
+The ~10K shared tool prefix is now warm from turn 1, giving 91-98% cache hits even on streaming requests.
 
 ## Phase 4: Sub-Agents Work Concurrently (~2 minutes)
 
@@ -124,9 +133,9 @@ These allow the [trace replay tester](https://github.com/callanjfox/kv-cache-tes
 |----------|---------------|-----|
 | Streaming → non-streaming pair | ~100% | Identical content, cache created by streaming |
 | Within-conversation growth | 93-99% | Prefix preserved, only new suffix tokens |
-| First sub-agent request | 0% | Different tools/system than parent |
+| First sub-agent request (all 4 concurrent) | 0% | All in-flight simultaneously, cache not yet written |
 | Sub-agent pairs | 96-100% | Streaming warms cache for non-streaming |
-| Cross-sub-agent | ~96% | All 4 share same tool definitions |
+| Sub-agent turn 2+ | 91-98% | Shared tool prefix warm from other sub-agents' turn 1 |
 | Parent after sub-agents | 58% → 100% | Old prefix cached, new results created, then warm |
 | After 5-minute user pause | 99% | Cache lives beyond typical session TTL |
 
