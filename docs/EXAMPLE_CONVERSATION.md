@@ -1,0 +1,156 @@
+# Example Conversation Walkthrough
+
+This walks through the included example database (`examples/requests.db`) to show how a real Claude Code conversation generates API requests and how the KV cache behaves.
+
+## The Prompt
+
+> "Can you clone a version of vllm locally and then fully analyze its full code path and write me a markdown file about key components."
+
+This single prompt generated **184 API requests** over **~17 minutes**, processing **7.7 million tokens** with a **93.3% overall cache hit rate**. The parent conversation (claude-opus-4-6) spawned 4 sub-agents (claude-haiku-4-5) to explore the codebase in parallel.
+
+## Phase 1: Parent Initial Request
+
+```
+  STREAM  opus  25,407 tokens in →  205 out | cache: 83.6% | api: 5.8s
+  NON-ST  opus  25,407 tokens in →  205 out | cache: 100%  | api: 4.9s  ← pair
+```
+
+The parent sends the user's prompt. The 25K input tokens are: tools (~15K) + system prompt (~6K) + user message. The streaming request creates the cache. The non-streaming pair (sent 6 seconds later with identical content) gets **100% cache hit** — this is the fundamental two-requests-per-tool-call pattern.
+
+The first streaming request already shows 83.6% cache hit because the API's global cache keeps tool definitions warm from other sessions.
+
+## Phase 2: Parent Tool Calls
+
+```
+  STREAM  opus  25,627 tokens in →  123 out | cache: 99.1% | api: 8.6s | think: 4.0s
+  NON-ST  opus  25,627 tokens in →   82 out | cache: 100%  | api: 2.9s
+  STREAM  opus  25,830 tokens in →  822 out | cache: 99.2% | api: 14.8s
+  NON-ST  opus  25,830 tokens in →  906 out | cache: 100%  | api: 17.5s | stop: tool_use
+```
+
+The parent clones the vLLM repo and inspects it. Context grows from 25K → 26K as tool results are added. Cache stays at **99%** — only the new tool result tokens at the end need processing. The 4-second `think_time` is the client executing the tool (git clone) before sending the next request.
+
+## Phase 3: 4 Sub-Agents Spawn Simultaneously
+
+```
+  STREAM  haiku 13,206 tokens in →  148 out | cache:  0.0% | api: 2.1s  ← SA1
+  STREAM  haiku 13,249 tokens in →  101 out | cache:  0.0% | api: 1.5s  ← SA2
+  STREAM  haiku 13,255 tokens in →  107 out | cache:  0.0% | api: 1.4s  ← SA3
+  STREAM  haiku 13,215 tokens in →  109 out | cache:  0.0% | api: 1.6s  ← SA4
+```
+
+All 4 Explore agents fire within **<1 second**. Their first requests show **0% cache** because sub-agents use different tools and system prompt than the parent (haiku has ~10K tool tokens vs opus ~15K). The entire content is new to the cache.
+
+But the non-streaming pairs immediately benefit:
+
+```
+  NON-ST  haiku 13,215 tokens in →  123 out | cache: 96.0%  ← SA4 pair
+  NON-ST  haiku 13,249 tokens in →  117 out | cache: 95.8%  ← SA2 pair
+  NON-ST  haiku 13,255 tokens in →  119 out | cache: 100%   ← SA3 pair
+  NON-ST  haiku 13,206 tokens in →  104 out | cache: 100%   ← SA1 pair
+```
+
+The streaming requests created the cache; the non-streaming pairs read it at 96-100%. The sub-agents also benefit from **each other** — all 4 share the same tool definitions (~10K tokens), so after the first sub-agent creates its cache, the others get hits on that shared prefix.
+
+## Phase 4: Sub-Agents Work Concurrently (~2 minutes)
+
+168 requests from 4 sub-agents running in parallel, each exploring different parts of the vLLM codebase. The pattern is consistent:
+
+- Context grows from ~13K → ~90K tokens as each agent reads files and accumulates conversation history
+- Within each sub-agent: **93-100% cache hit** (prefix preserved, only new tool results added)
+- Across sub-agents: shared tool prefix (~10K tokens) stays warm in global cache
+- Streaming requests create cache, non-streaming pairs get ~100% hit
+
+```
+  SA1: 42 requests, grows to 73K tokens
+  SA2: 27 requests, grows to 89K tokens
+  SA3: 52 requests, grows to 83K tokens
+  SA4: 46 requests, grows to 73K tokens
+```
+
+## Phase 5: Parent Resumes
+
+```
+  STREAM  opus  44,604 tokens in → 6,421 out | cache: 57.9% | api: 120s
+  NON-ST  opus  44,604 tokens in → 6,281 out | cache: 71.3% | api: 121s
+```
+
+The parent resumes after all sub-agents complete. The cache hit drops to 58% — but **not because the cache expired**. The breakdown:
+
+| Component | Tokens | Status |
+|-----------|--------|--------|
+| Original prefix (tools + system + early messages) | 25,829 | **Cached** — still warm from Phase 2 |
+| Sub-agent results (new content injected) | 5,954 | **Created** — never cached before |
+| Request overhead | 12,821 | Uncached |
+
+The context grew from 26K to 45K tokens because the sub-agent results were injected into the conversation. The old prefix is 100% cached; the "low" percentage is simply the ratio of old-to-new content.
+
+By the next request pair, the new content is also cached:
+
+```
+  STREAM  opus  50,916 tokens in →   441 out | cache: 62.4% | api: 11s
+  NON-ST  opus  50,916 tokens in →   480 out | cache: 100%  | api: 11s | stop: end_turn
+```
+
+The parent writes the architecture summary (441 output tokens) and the conversation ends with `end_turn`.
+
+## Phase 6: User Follow-Up
+
+```
+  STREAM  opus  51,407 tokens in →  108 out | cache: 99.0% | api: 3.3s | think: 315s
+```
+
+The user reads the output for **~5 minutes** (`think_time: 315s`), then asks "Rewrite this in pirate speak." The cache is still warm — 99% hit despite the long pause. The `think_time` field captures this real-world user behavior pattern.
+
+## Timing Breakdown
+
+Each request records two timing components:
+
+| Metric | Range | What It Measures |
+|--------|-------|------------------|
+| `api_time` | 0.9s - 197s | Server processing (prefill + decode) |
+| `think_time` | 0s - 315s | Client delay before sending request |
+
+- **Streaming pairs**: `think_time ≈ 0` (sent concurrently)
+- **Tool call results**: `think_time = 0-4s` (tool execution time)
+- **User reading**: `think_time = 315s` (user thinking/reading)
+- **Sub-agent wait**: `think_time = 284s` (parent waiting for sub-agents)
+
+These allow the [trace replay tester](https://github.com/callanjfox/kv-cache-tester) to simulate different server speeds while preserving real client behavior patterns.
+
+## Cache Summary
+
+| Scenario | Cache Hit Rate | Why |
+|----------|---------------|-----|
+| Streaming → non-streaming pair | ~100% | Identical content, cache created by streaming |
+| Within-conversation growth | 93-99% | Prefix preserved, only new suffix tokens |
+| First sub-agent request | 0% | Different tools/system than parent |
+| Sub-agent pairs | 96-100% | Streaming warms cache for non-streaming |
+| Cross-sub-agent | ~96% | All 4 share same tool definitions |
+| Parent after sub-agents | 58% → 100% | Old prefix cached, new results created, then warm |
+| After 5-minute user pause | 99% | Cache lives beyond typical session TTL |
+
+## How to Reproduce
+
+```bash
+# Setup
+python3 build_message_index.py examples/requests.db
+python3 build_conversation_index.py examples/requests.db --projects-path examples/jsonl/
+
+# Generate trace with timing data
+python3 build_minimal_traces.py examples/requests.db \
+    --jsonl-dir examples/jsonl/ \
+    --output-dir examples/traces/ \
+    --block-size 64 \
+    --include-subagents
+
+# Validate against API metrics
+python3 validate_trace_cache.py examples/traces/ \
+    --db examples/requests.db \
+    --jsonl-dir examples/jsonl/
+
+# Visualize
+python3 complete_cache_visualizer.py examples/requests.db \
+    --conversation-id combined \
+    --output examples/visualizations/combined.html
+```

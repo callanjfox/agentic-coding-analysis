@@ -224,6 +224,7 @@ See [docs/REPLAY_INTEGRATION.md](docs/REPLAY_INTEGRATION.md) for details on conv
 
 | Document | Contents |
 |----------|----------|
+| [docs/EXAMPLE_CONVERSATION.md](docs/EXAMPLE_CONVERSATION.md) | Step-by-step walkthrough of the example conversation showing how requests, cache, and sub-agents work |
 | [docs/TRACE_FORMAT.md](docs/TRACE_FORMAT.md) | Complete trace JSON schema, hash algorithm, sub-agent format |
 | [docs/REPLAY_INTEGRATION.md](docs/REPLAY_INTEGRATION.md) | How to replay traces, conversation accumulation, validation |
 | [docs/CACHE_BEHAVIOR.md](docs/CACHE_BEHAVIOR.md) | Claude API caching mechanics, request pairing, TTL behavior |
