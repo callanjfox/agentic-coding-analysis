@@ -174,6 +174,7 @@ Traces are compact JSON files capturing cache block structure without actual mes
   "id": "8712b46f-04e",
   "models": ["claude-sonnet-4-20250514"],
   "block_size": 64,
+  "hash_id_scope": "global",
   "tool_tokens": 11880,
   "system_tokens": 3427,
   "requests": [
@@ -186,7 +187,9 @@ Traces are compact JSON files capturing cache block structure without actual mes
       "hash_ids": [1, 2, 3, "...", 298],
       "input_types": ["text"],
       "output_types": ["thinking", "text", "tool_use"],
-      "stop": "tool_use"
+      "stop": "tool_use",
+      "api_time": 5.81,
+      "think_time": 0.0
     }
   ]
 }
@@ -194,7 +197,12 @@ Traces are compact JSON files capturing cache block structure without actual mes
 
 Key fields:
 - **`hash_ids`** — Ordered block hashes for prefix-based cache matching. Two requests sharing a hash_id prefix share cached content.
+- **`hash_id_scope`** — `"global"` means hash_ids are consistent across all conversations and sub-agents in a batch. Same content at the same position always gets the same ID, enabling cross-conversation cache simulation.
 - **`tool_tokens` / `system_tokens`** — Shared prefix (~15K tokens) that stays warm in API's global cache across sessions.
+- **`api_time`** — Server processing time in seconds (from proxy's `responseTime`). How long the API took to respond.
+- **`think_time`** — Client delay before this request in seconds. The gap between the previous response completing and this request being sent. Captures tool execution time, user reading time, and sub-agent wait time.
+
+These timing fields allow the [trace replay tester](https://github.com/callanjfox/kv-cache-tester) to simulate different server speeds while preserving real client behavior. For example, `--timing-strategy api-scaled --api-time-scale 0.2` replays with a simulated 5x faster server but keeps real user/tool delays intact.
 
 ## How Caching Works
 
