@@ -562,7 +562,10 @@ def build_subagent_index(jsonl_dir: Path) -> Dict[str, Dict]:
     """
     index = {}
 
-    for jsonl_path in jsonl_dir.glob("agent-*.jsonl"):
+    # Search both old layout (agent-*.jsonl in dir root) and new layout
+    # (*/subagents/agent-*.jsonl in session subdirectories)
+    agent_files = list(jsonl_dir.glob("agent-*.jsonl")) + list(jsonl_dir.glob("*/subagents/agent-*.jsonl"))
+    for jsonl_path in agent_files:
         agent_id = jsonl_path.stem.replace("agent-", "")
 
         first_ts = None
@@ -1084,7 +1087,7 @@ def main():
     jsonl_files = [f for f in jsonl_dir.glob("*.jsonl") if not f.name.startswith("agent-")]
     print(f"Found {len(jsonl_files)} parent conversation JSONL files in {jsonl_dir}")
     if args.include_subagents:
-        agent_files = list(jsonl_dir.glob("agent-*.jsonl"))
+        agent_files = list(jsonl_dir.glob("agent-*.jsonl")) + list(jsonl_dir.glob("*/subagents/agent-*.jsonl"))
         print(f"Found {len(agent_files)} sub-agent JSONL files")
     print()
 
