@@ -113,13 +113,15 @@ The user reads the output for **~5 minutes** (`think_time: 315s`), then asks "Re
 
 ## Timing Breakdown
 
-Each request records two timing components:
+Each request records three timing components:
 
 | Metric | Range | What It Measures |
 |--------|-------|------------------|
-| `api_time` | 0.9s - 197s | Server processing (prefill + decode) |
+| `api_time` | 0.9s - 197s | Total response time (prefill + decode + streaming) |
+| `ttft` | 0.6s - 3.5s | Time to first token — server-side latency before first token (streaming only) |
 | `think_time` | 0s - 315s | Client delay before sending request |
 
+- **`ttft`**: Only present on streaming requests. For non-streaming requests, TTFT equals `api_time` so it is omitted. Derived from the `Server-Timing` response header (or `X-Envoy-Upstream-Service-Time` for older proxy versions).
 - **Streaming pairs**: `think_time ≈ 0` (sent concurrently)
 - **Tool call results**: `think_time = 0-4s` (tool execution time)
 - **User reading**: `think_time = 315s` (user thinking/reading)
