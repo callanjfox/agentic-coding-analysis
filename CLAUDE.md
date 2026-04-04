@@ -76,7 +76,7 @@ python3 recover_conversations.py requests.db \
 ## Key Features
 
 - **Global hash_ids**: Shared across all conversations in a batch — enables cross-conversation cache simulation
-- **Timing breakdown**: `api_time` (server processing) and `think_time` (client delay) per request
+- **Timing breakdown**: `api_time` (total response time), `ttft` (time to first token from Server-Timing header), and `think_time` (client delay) per request
 - **Sub-agent support**: Nested sub-agent traces with isolated cache contexts
 - **Anonymization**: `--anonymize` strips conversation IDs, timestamps, and agent IDs
 

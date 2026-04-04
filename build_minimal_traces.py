@@ -142,19 +142,20 @@ class MinimalTraceBuilder:
         # Return sorted for consistency
         return sorted(content_types)
 
-    def extract_response_info(self, response_str: Optional[str]) -> Tuple[int, str, List[str], Optional[float], Optional[str]]:
+    def extract_response_info(self, response_str: Optional[str]) -> Tuple[int, str, List[str], Optional[float], Optional[float], Optional[str]]:
         """Extract output_tokens, stop_reason, output content types, and timing from response.
 
-        Returns: (output_tokens, stop_reason, output_types, api_time_secs, completed_at_iso)
+        Returns: (output_tokens, stop_reason, output_types, api_time_secs, ttft_secs, completed_at_iso)
         """
         output_tokens = 0
         stop_reason = ""
         output_types = []
         api_time_secs = None
+        ttft_secs = None
         completed_at_iso = None
 
         if not response_str:
-            return output_tokens, stop_reason, output_types, api_time_secs, completed_at_iso
+            return output_tokens, stop_reason, output_types, api_time_secs, ttft_secs, completed_at_iso
 
         try:
             resp = json.loads(response_str)
@@ -181,10 +182,28 @@ class MinimalTraceBuilder:
                 api_time_secs = response_time_ms / 1000.0
             completed_at_iso = resp.get('completedAt')
 
+            # Extract TTFT from Server-Timing or X-Envoy-Upstream-Service-Time header.
+            # For streaming requests this is the server-side time to first token;
+            # for non-streaming requests it approximately equals api_time.
+            # Server-Timing (x-originResponse;dur=<ms>) is preferred; older proxy
+            # versions only capture X-Envoy-Upstream-Service-Time (<ms>).
+            headers = resp.get('headers', {})
+            server_timing = headers.get('Server-Timing', [])
+            if server_timing:
+                st_value = server_timing[0] if isinstance(server_timing, list) else server_timing
+                if 'dur=' in str(st_value):
+                    dur_str = str(st_value).split('dur=')[1].split(';')[0].split(',')[0]
+                    ttft_secs = float(dur_str) / 1000.0
+            if ttft_secs is None:
+                envoy_timing = headers.get('X-Envoy-Upstream-Service-Time', [])
+                if envoy_timing:
+                    ev_value = envoy_timing[0] if isinstance(envoy_timing, list) else envoy_timing
+                    ttft_secs = float(ev_value) / 1000.0
+
         except Exception:
             pass
 
-        return output_tokens, stop_reason, output_types, api_time_secs, completed_at_iso
+        return output_tokens, stop_reason, output_types, api_time_secs, ttft_secs, completed_at_iso
 
     def process_request(self, ts: datetime, body_str: str, response_str: Optional[str], req_type: str):
         """Process one request and add to records"""
@@ -230,7 +249,7 @@ class MinimalTraceBuilder:
             prev_hash = chunk_hash
 
         # Get response info (output + timing)
-        output_tokens, stop_reason, output_types, api_time_secs, completed_at_iso = self.extract_response_info(response_str)
+        output_tokens, stop_reason, output_types, api_time_secs, ttft_secs, completed_at_iso = self.extract_response_info(response_str)
 
         # Compute think_time: gap between previous response completing and this request being sent
         think_time = None
@@ -294,6 +313,8 @@ class MinimalTraceBuilder:
         # Add timing breakdown (if available from proxy response)
         if api_time_secs is not None:
             record["api_time"] = round(api_time_secs, 2)
+        if ttft_secs is not None and req_type_short == "s":
+            record["ttft"] = round(ttft_secs, 2)
         if think_time is not None:
             record["think_time"] = round(think_time, 2)
 

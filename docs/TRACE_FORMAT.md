@@ -65,6 +65,9 @@ warm_prefix_blocks = (trace['tool_tokens'] + trace['system_tokens']) // trace['b
 | `input_types` | string[] | What the client added this turn |
 | `output_types` | string[] | Content types in Claude's response |
 | `stop` | string | Stop reason: `""`, `"tool_use"`, `"end_turn"` |
+| `api_time` | float? | Total response time in seconds (from proxy `responseTime`) |
+| `ttft` | float? | Time to first token in seconds (from `Server-Timing` header). Only present on streaming requests (`type: "s"`), where it captures server-side latency before the first token. Omitted on non-streaming requests since TTFT equals `api_time` |
+| `think_time` | float? | Client delay before this request in seconds (gap since previous response completed) |
 
 ### input_types Values
 

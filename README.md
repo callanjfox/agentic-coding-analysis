@@ -189,6 +189,7 @@ Traces are compact JSON files capturing cache block structure without actual mes
       "output_types": ["thinking", "text", "tool_use"],
       "stop": "tool_use",
       "api_time": 5.81,
+      "ttft": 3.52,
       "think_time": 0.0
     }
   ]
@@ -199,7 +200,8 @@ Key fields:
 - **`hash_ids`** — Ordered block hashes for prefix-based cache matching. Two requests sharing a hash_id prefix share cached content.
 - **`hash_id_scope`** — `"global"` means hash_ids are consistent across all conversations and sub-agents in a batch. Same content at the same position always gets the same ID, enabling cross-conversation cache simulation.
 - **`tool_tokens` / `system_tokens`** — Shared prefix (~15K tokens) that stays warm in API's global cache across sessions.
-- **`api_time`** — Server processing time in seconds (from proxy's `responseTime`). How long the API took to respond.
+- **`api_time`** — Total response time in seconds (from proxy's `responseTime`). How long the API took to respond.
+- **`ttft`** — Time to first token in seconds (from `Server-Timing` header). Only present on streaming requests, where it captures server-side latency before the first token. Omitted on non-streaming requests since TTFT equals `api_time`.
 - **`think_time`** — Client delay before this request in seconds. The gap between the previous response completing and this request being sent. Captures tool execution time, user reading time, and sub-agent wait time.
 
 These timing fields allow the [trace replay tester](https://github.com/callanjfox/kv-cache-tester) to simulate different server speeds while preserving real client behavior. For example, `--timing-strategy api-scaled --api-time-scale 0.2` replays with a simulated 5x faster server but keeps real user/tool delays intact.
