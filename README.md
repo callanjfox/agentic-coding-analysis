@@ -211,8 +211,10 @@ These timing fields allow the [trace replay tester](https://github.com/callanjfo
 1. **Tokenize** request content in order: tools → system → messages
 2. **Normalize** — remove `cache_control` and `signature` fields (they vary between requests)
 3. **Block** — split into 64-token blocks (full blocks only; partial blocks are discarded)
-4. **Chain hash** — each block's SHA256 hash includes the previous block's hash, encoding position
+4. **Chain hash** — each block's SHA256 hash includes the previous block's hash (encoding position) and a random salt generated once per run
 5. **Assign IDs** — each unique hash gets a sequential integer ID
+
+The salt prevents someone from tokenizing known content and confirming whether it appears in an anonymized trace. It is never written to the output files — the replay tool only compares pre-computed hash_ids and never needs to recompute them.
 
 Cache hits are prefix-based: if block N misses, all subsequent blocks also miss. This means cache hit rate is determined by the length of the matching prefix.
 

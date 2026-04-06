@@ -85,7 +85,7 @@ python3 recover_conversations.py requests.db \
 ### Cache Simulation
 - Block size: 64 tokens (default)
 - Tokenizer: tiktoken GPT-4 encoder
-- Hash: SHA256 chained (each block depends on previous)
+- Hash: SHA256 chained (each block depends on previous), salted with a random value per run to prevent content identification in anonymized traces
 - Normalization: removes `cache_control` and `signature` fields
 
 ### Two Requests Per Tool Call

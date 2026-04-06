@@ -29,6 +29,7 @@ Usage:
 import sqlite3
 import json
 import hashlib
+import secrets
 import tiktoken
 import argparse
 import uuid
@@ -71,7 +72,7 @@ class ConversationChain:
 
 
 # Standalone function for multiprocessing (can't pickle methods)
-def compute_hash_ids_standalone(body_str: str, block_size: int = 64) -> List[int]:
+def compute_hash_ids_standalone(body_str: str, block_size: int = 64, salt: str = "") -> List[int]:
     """Compute block hash IDs for a request body (standalone for multiprocessing)"""
     import copy
 
@@ -92,7 +93,7 @@ def compute_hash_ids_standalone(body_str: str, block_size: int = 64) -> List[int
         return normalized
 
     def create_chained_hash(tokens, prev_hash, seq_num):
-        content = f"{prev_hash}:{seq_num}:" + " ".join(map(str, tokens))
+        content = f"{salt}:{prev_hash}:{seq_num}:" + " ".join(map(str, tokens))
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     body = json.loads(body_str)
@@ -136,9 +137,10 @@ def compute_hash_ids_standalone(body_str: str, block_size: int = 64) -> List[int
 class ConversationRecoverer:
     """Recovers conversations from database without JSONL files"""
 
-    def __init__(self, block_size: int = 64):
+    def __init__(self, block_size: int = 64, salt: str = None):
         self.block_size = block_size
         self.tokenizer = tiktoken.encoding_for_model("gpt-4")
+        self.salt = salt if salt is not None else secrets.token_hex(16)
 
         # Hash management
         self.hash_to_id: Dict[str, int] = {}
@@ -153,7 +155,7 @@ class ConversationRecoverer:
 
     def create_chained_hash(self, token_ids: List[int], prev_hash: str, seq_num: int) -> str:
         """Create a hash that chains with previous block"""
-        content = f"{prev_hash}:{seq_num}:" + " ".join(map(str, token_ids))
+        content = f"{self.salt}:{prev_hash}:{seq_num}:" + " ".join(map(str, token_ids))
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     def normalize_for_cache(self, obj) -> any:
@@ -429,7 +431,7 @@ class ConversationRecoverer:
             # Submit all jobs
             future_to_idx = {}
             for i, body_str in enumerate(body_strs):
-                future = executor.submit(compute_hash_ids_standalone, body_str, self.block_size)
+                future = executor.submit(compute_hash_ids_standalone, body_str, self.block_size, self.salt)
                 future_to_idx[future] = i
 
             # Collect results

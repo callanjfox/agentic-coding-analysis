@@ -34,6 +34,7 @@ Output format:
 import sqlite3
 import json
 import hashlib
+import secrets
 import tiktoken
 import argparse
 import os
@@ -50,9 +51,10 @@ class MinimalTraceBuilder:
     across requests - the last partial chunk would always change as content grows.
     """
 
-    def __init__(self, block_size: int = 256, shared_hash_state: dict = None):
+    def __init__(self, block_size: int = 256, shared_hash_state: dict = None, salt: str = None):
         self.block_size = block_size
         self.tokenizer = tiktoken.encoding_for_model("gpt-4")
+        self.salt = salt if salt is not None else secrets.token_hex(16)
 
         # Hash management - assigns numeric IDs to unique hashes
         # When shared_hash_state is provided, all builders share the same
@@ -90,7 +92,7 @@ class MinimalTraceBuilder:
 
     def create_chained_hash(self, token_ids: List[int], prev_hash: str, seq_num: int) -> str:
         """Create a hash that chains with previous block"""
-        content = f"{prev_hash}:{seq_num}:" + " ".join(map(str, token_ids))
+        content = f"{self.salt}:{prev_hash}:{seq_num}:" + " ".join(map(str, token_ids))
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     def normalize_for_cache(self, obj: Any) -> Any:
@@ -546,7 +548,8 @@ def process_conversation(conn, conversation_id: str, jsonl_path: Path, msg_id_ma
         if len(segment) < args.min_requests:
             continue
 
-        builder = MinimalTraceBuilder(args.block_size, shared_hash_state=shared_hash_state)
+        salt = shared_hash_state.get('salt', '') if shared_hash_state else None
+        builder = MinimalTraceBuilder(args.block_size, shared_hash_state=shared_hash_state, salt=salt)
 
         for req_id, ts_str, body_str, resp_str in segment:
             ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
@@ -851,7 +854,8 @@ def process_subagent(conn, agent_id: str, subagent_index: Dict[str, Dict],
     subagent_reqs.sort(key=lambda x: x[1])
 
     # Build trace for sub-agent
-    builder = MinimalTraceBuilder(args.block_size, shared_hash_state=shared_hash_state)
+    salt = shared_hash_state.get('salt', '') if shared_hash_state else None
+    builder = MinimalTraceBuilder(args.block_size, shared_hash_state=shared_hash_state, salt=salt)
 
     for req_id, ts_str, body_str, resp_str in subagent_reqs:
         ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
@@ -1102,7 +1106,8 @@ def main():
 
     # Shared hash state across all conversations in this batch run
     # Makes hash_ids globally consistent: same content = same ID
-    shared_hash_state = {'hash_to_id': {}, 'next_id': 1}
+    # Salt prevents reversing hashes to identify content in anonymized traces
+    shared_hash_state = {'hash_to_id': {}, 'next_id': 1, 'salt': secrets.token_hex(16)}
 
     # Find JSONL files (exclude agent-* files from main processing)
     jsonl_files = [f for f in jsonl_dir.glob("*.jsonl") if not f.name.startswith("agent-")]

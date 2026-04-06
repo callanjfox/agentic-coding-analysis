@@ -148,12 +148,13 @@ These allow the [trace replay tester](https://github.com/callanjfox/kv-cache-tes
 python3 build_message_index.py examples/requests.db
 python3 build_conversation_index.py examples/requests.db --projects-path examples/jsonl/
 
-# Generate trace with timing data
+# Generate trace with timing data (--anonymize strips IDs and salts hashes)
 python3 build_minimal_traces.py examples/requests.db \
     --jsonl-dir examples/jsonl/ \
     --output-dir examples/traces/ \
     --block-size 64 \
-    --include-subagents
+    --include-subagents \
+    --anonymize
 
 # Validate against API metrics
 python3 validate_trace_cache.py examples/traces/ \

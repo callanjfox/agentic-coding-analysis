@@ -97,13 +97,17 @@ Content types Claude returned:
 3. **Serialize** — `json.dumps(obj, separators=(',', ':'))`
 4. **Tokenize** — using tiktoken `gpt-4` encoding
 5. **Block** — split into `block_size` token blocks (**full blocks only**, partial discarded)
-6. **Chain hash** — each block depends on the previous block's hash
+6. **Chain hash** — each block depends on the previous block's hash, salted with a random value generated once per trace-building run
 
 ```python
-def create_chained_hash(token_ids, prev_hash, seq_num):
-    content = f"{prev_hash}:{seq_num}:" + " ".join(map(str, token_ids))
+def create_chained_hash(token_ids, prev_hash, seq_num, salt):
+    content = f"{salt}:{prev_hash}:{seq_num}:" + " ".join(map(str, token_ids))
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 ```
+
+### Salt
+
+A random salt (`secrets.token_hex(16)`) is generated once per trace-building run and used in every hash computation. The salt is **never written to the output trace files** — it exists only during generation. This prevents confirmation attacks where someone could tokenize known content and check whether its hash appears in an anonymized trace. The replay tool is unaffected because it only compares pre-computed hash_ids, never recomputes them.
 
 ### Hash ID Assignment
 

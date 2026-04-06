@@ -81,14 +81,17 @@ def normalize_for_cache(obj: Any) -> Any:
     return normalized
 
 
-def create_chained_hash(token_ids: List[int], prev_hash: str, seq_num: int) -> str:
+def create_chained_hash(token_ids: List[int], prev_hash: str, seq_num: int, salt: str = "") -> str:
     """Create a hash that chains with previous block.
 
     Each block's hash depends on the previous block's hash, ensuring that
     identical content at the same position produces identical hashes (and
     different positions produce different hashes even for same content).
+
+    When salt is provided, hashes cannot be reversed to identify content,
+    preventing confirmation attacks against anonymized trace files.
     """
-    content = f"{prev_hash}:{seq_num}:" + " ".join(map(str, token_ids))
+    content = f"{salt}:{prev_hash}:{seq_num}:" + " ".join(map(str, token_ids))
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
