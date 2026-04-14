@@ -5,7 +5,7 @@ Trace generation requires **two complementary data sources** working together:
 1. **`requests.db`** — from [claude-code-proxy](https://github.com/seifghazi/claude-code-proxy), captures every API request and response
 2. **JSONL files** — from Claude Code's local storage (`~/.claude/projects/`), provides conversation structure and message linking
 
-The proxy captures the raw API traffic (including both streaming and non-streaming requests). The JSONL files provide the conversation thread structure that links requests into coherent sessions. Together, they enable accurate trace generation.
+The proxy captures the raw API traffic. The JSONL files provide the conversation thread structure that links requests into coherent sessions. Together, they enable accurate trace generation.
 
 ## The Two Sources in Detail
 
@@ -21,9 +21,8 @@ Claude Code (the CLI tool) saves conversation history to local JSONL files at `~
 - Metadata: timestamps, `isSidechain` flag, `toolUseResult` with agent linking info
 
 **What they capture:**
-- Only the **non-streaming** response (the one used for tool execution)
-- The streaming response (shown in real-time UI) is **not saved** to JSONL
-- This means JSONL files represent ~50% of actual API traffic
+- The canonical response for each turn (one entry per assistant message)
+- Message IDs link directly to the corresponding request in `requests.db`
 
 **Example JSONL entry:**
 ```json
@@ -41,9 +40,10 @@ The [claude-code-proxy](https://github.com/seifghazi/claude-code-proxy) sits bet
 - Timestamps for each request
 
 **What it captures:**
-- **Both** streaming and non-streaming requests (100% of traffic)
+- All API requests and responses
 - Actual API cache metrics (`cache_read_input_tokens`, `cache_creation_input_tokens`)
 - Token counts, model IDs, stop reasons
+- Note: older proxy versions produced duplicate streaming/non-streaming pairs per turn due to a bug (see [seifghazi/claude-code-proxy#33](https://github.com/seifghazi/claude-code-proxy/pull/33)); the analysis tools handle both old and fixed proxy data
 
 **Schema:**
 ```sql
@@ -85,16 +85,9 @@ Earlier approaches used **timestamp matching** (find the DB request closest in t
 
 Message ID matching achieves **98-100%** because each `msg_01XYZ...` ID is globally unique and appears in exactly one DB response.
 
-### Why Only Non-Streaming Gets Indexed
+### What Gets Indexed
 
-The JSONL files only record non-streaming responses (the ones used for tool execution). This means:
-
-| Request Type | Has Message ID | In JSONL | In requests.db |
-|-------------|---------------|----------|----------------|
-| Streaming | Yes | No | Yes |
-| Non-streaming | Yes | Yes | Yes |
-
-To find the streaming pair for an indexed non-streaming request, use content matching: find the streaming request within 30 seconds that has matching tool/system hashes.
+The JSONL files record one response per turn. Each message ID maps to exactly one request in `requests.db`, which the trace builder uses directly. In older proxy data (with streaming duplicates), the JSONL message IDs point to the non-streaming requests, which have complete metadata (`stop_reason`, content types, usage).
 
 ## Recovery: When JSONL Files Are Missing
 
@@ -102,9 +95,9 @@ Sometimes JSONL files are unavailable (deleted, different machine, lost). The `r
 
 ### How Recovery Works
 
-1. **Classify** each request as streaming/non-streaming by `max_tokens` and `stream` fields
-2. **Pair** streaming + non-streaming requests by matching content hashes (tool definitions + system prompt + message content)
-3. **Chain** pairs into conversations by hash prefix overlap — if request B's hash_ids share >97% prefix with request A, they're in the same conversation
+1. **Classify** each request as streaming or non-streaming by the `stream` field
+2. **Group** requests into turns — anchoring on streaming requests, with optional non-streaming partners matched by content hash within 30 seconds
+3. **Chain** turns into conversations by hash prefix overlap — if request B's hash_ids share >97% prefix with request A, they're in the same conversation
 4. **Order** by timestamp to reconstruct the conversation timeline
 
 ### Important: Use `--exclude-indexed`
@@ -140,7 +133,7 @@ This prevents duplicate requests appearing in both real and recovered traces.
               │               │                   │
     ~/.claude/projects/       │                   ▼
     <hash>/<conv-id>.jsonl    │            requests.db
-    (non-streaming only)      │            (ALL requests + responses)
+    (one entry per turn)       │            (ALL requests + responses)
                               │
                               ▼
                         Anthropic API

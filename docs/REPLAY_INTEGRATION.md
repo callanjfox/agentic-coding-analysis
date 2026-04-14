@@ -51,13 +51,9 @@ def replay_request(req, messages, tools, system):
     return response
 ```
 
-### Streaming vs Non-Streaming
+### Request Types
 
-Requests come in pairs with identical content:
-- `"s"` (streaming, `max_tokens=32000`) — send first
-- `"n"` (non-streaming, `max_tokens=21333`) — send 5-8 seconds later
-
-The non-streaming request benefits from cache created by the streaming request.
+Trace requests have `type: "s"` (streaming) or `type: "n"` (non-streaming) depending on the proxy version used during collection. Both are functionally equivalent for replay — each represents one conversation turn.
 
 ## Tool Flow
 
@@ -65,7 +61,7 @@ When `stop: "tool_use"`, the next cross-turn request must include a `tool_result
 
 ```
 Request N:   stop="tool_use", output_types=["thinking", "text", "tool_use"]
-Request N+2: input_types=["tool_result"]  (N+1 is the within-turn pair)
+Request N+1: input_types=["tool_result"]
 ```
 
 ### Verification
@@ -144,10 +140,9 @@ When replaying correctly:
 
 | Scenario | Expected Cache Hit Rate |
 |----------|------------------------|
-| Within-turn pair (s→n) | ~100% |
-| Cross-turn (new content) | 97-99% of prefix |
-| First request | 0% (or ~100% if global cache warm) |
-| Sub-agent first request | 0% (independent cache) |
+| Cross-turn (new content appended) | 93-99% of prefix |
+| First request | 0% (or high if global cache warm from other sessions) |
+| Sub-agent first request | 0% (independent cache context) |
 
 The ~1-2pp gap between simulation and actual API is due to cross-conversation caching of the tool definitions + system prompt prefix.
 
@@ -161,7 +156,7 @@ def validate_token_growth(requests, tolerance=0.15):
     for req in requests:
         if req.get('type') == 'subagent':
             continue
-        if prev and req['in'] != prev['in']:  # Skip within-turn pairs
+        if prev:
             expected = prev['in'] + prev['out']
             if not (expected <= req['in'] <= expected * (1 + tolerance)):
                 print(f"Unexpected growth: {prev['in']}+{prev['out']} → {req['in']}")

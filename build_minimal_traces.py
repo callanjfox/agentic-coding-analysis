@@ -51,10 +51,11 @@ class MinimalTraceBuilder:
     across requests - the last partial chunk would always change as content grows.
     """
 
-    def __init__(self, block_size: int = 256, shared_hash_state: dict = None, salt: str = None):
+    def __init__(self, block_size: int = 256, shared_hash_state: dict = None, salt: str = None, hash_id_scope: str = "global"):
         self.block_size = block_size
         self.tokenizer = tiktoken.encoding_for_model("gpt-4")
         self.salt = salt if salt is not None else secrets.token_hex(16)
+        self.hash_id_scope = hash_id_scope
 
         # Hash management - assigns numeric IDs to unique hashes
         # When shared_hash_state is provided, all builders share the same
@@ -178,6 +179,28 @@ class MinimalTraceBuilder:
                             types_set.add(block_type)
                 output_types = sorted(types_set)
 
+            # For streaming responses, the proxy's reconstructed body
+            # often lacks stop_reason and content types. Parse the raw
+            # SSE chunks to recover them.
+            if (not stop_reason or not output_types) and 'streamingChunks' in resp:
+                for chunk_line in resp['streamingChunks']:
+                    chunk_data = chunk_line.replace('data: ', '', 1)
+                    try:
+                        evt = json.loads(chunk_data)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    evt_type = evt.get('type', '')
+                    if evt_type == 'content_block_start':
+                        cb = evt.get('content_block', {})
+                        if isinstance(cb, dict) and cb.get('type'):
+                            types_set.add(cb['type'])
+                    elif evt_type == 'message_delta':
+                        delta = evt.get('delta', {})
+                        if not stop_reason and delta.get('stop_reason'):
+                            stop_reason = delta['stop_reason']
+                if not output_types:
+                    output_types = sorted(types_set)
+
             # Extract timing from proxy envelope (if available)
             response_time_ms = resp.get('responseTime')
             if response_time_ms is not None:
@@ -287,17 +310,22 @@ class MinimalTraceBuilder:
         elif is_major_reset:
             # Major context reset - show actual content types from messages
             input_types = self.get_message_content_types(messages)
-        elif req_type_short == "s" and self.prev_req_type == "n":
-            # Cross-turn: non-streaming -> streaming = new turn
-            if self.prev_stop_reason == "tool_use":
-                input_types = ["tool_result"]
-            elif self.prev_stop_reason == "end_turn":
+        elif self.prev_stop_reason == "tool_use":
+            # Previous turn used a tool — client added tool results
+            input_types = ["tool_result"]
+        elif self.prev_stop_reason == "end_turn":
+            # Previous turn ended — user sent new text
+            input_types = ["text"]
+        elif self.prev_stop_reason:
+            # Other stop reason — default to text
+            input_types = ["text"]
+        else:
+            # No previous stop_reason (e.g. unpaired streaming request
+            # where metadata is incomplete) — infer from context change
+            if self.prev_hash_ids and hash_ids and hash_ids != self.prev_hash_ids:
                 input_types = ["text"]
             else:
-                input_types = ["text"]  # Default to text for unknown
-        else:
-            # Within-turn pair (s->n) or other - no new client input
-            input_types = []
+                input_types = ["text"]
 
         # Create minimal record
         record = {
@@ -334,7 +362,7 @@ class MinimalTraceBuilder:
             "id": conversation_id[:12],
             "models": sorted(self.models),
             "block_size": self.block_size,
-            "hash_id_scope": "global",
+            "hash_id_scope": self.hash_id_scope,
             "tool_tokens": self.tool_tokens,
             "system_tokens": self.system_tokens,
             "requests": self.records
@@ -467,52 +495,11 @@ def process_conversation(conn, conversation_id: str, jsonl_path: Path, msg_id_ma
     range_start = (first_ts - timedelta(seconds=300)).isoformat()
     range_end = (last_ts + timedelta(seconds=300)).isoformat()
 
-    # Get ALL requests in time range to find streaming pairs
-    all_reqs = cursor.execute("""
-        SELECT id, timestamp, body, response
-        FROM requests
-        WHERE response IS NOT NULL
-          AND timestamp >= ?
-          AND timestamp <= ?
-        ORDER BY timestamp
-    """, (range_start, range_end)).fetchall()
-
-    # Extract tool/system/content hashes for matching
-    def extract_hashes(body_str: str) -> Tuple[str, str, str]:
-        body = json.loads(body_str)
-        tools = body.get('tools', [])
-        system = body.get('system', [])
-        messages = body.get('messages', [])
-        tool_hash = hashlib.md5(json.dumps(tools, separators=(',', ':')).encode()).hexdigest()[:16]
-        sys_hash = hashlib.md5(json.dumps(system, separators=(',', ':')).encode()).hexdigest()[:16]
-        msg_hash = hashlib.md5(json.dumps(messages, separators=(',', ':')).encode()).hexdigest()[:16]
-        return tool_hash, sys_hash, msg_hash
-
-    # Get hashes from indexed requests
-    indexed_info = []
-    for req_id, ts_str, body_str, resp_str in indexed_reqs:
-        tool_hash, sys_hash, msg_hash = extract_hashes(body_str)
-        indexed_info.append((req_id, ts_str, tool_hash, sys_hash, msg_hash))
-
-    # Find all conversation requests (indexed + streaming pairs)
-    conversation_reqs = []
-    for req_id, ts_str, body_str, resp_str in all_reqs:
-        ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-
-        if req_id in indexed_ids:
-            conversation_reqs.append((req_id, ts_str, body_str, resp_str))
-            continue
-
-        # Check if this is a streaming pair (must match content, not just tools/system)
-        tool_hash, sys_hash, msg_hash = extract_hashes(body_str)
-
-        for idx_id, idx_ts, idx_tool_hash, idx_sys_hash, idx_msg_hash in indexed_info:
-            idx_dt = datetime.fromisoformat(idx_ts.replace('Z', '+00:00'))
-            gap = abs((ts - idx_dt).total_seconds())
-
-            if gap < 30 and msg_hash == idx_msg_hash:
-                conversation_reqs.append((req_id, ts_str, body_str, resp_str))
-                break
+    # Use indexed requests directly — these are the non-streaming
+    # requests mapped from JSONL message IDs, which have complete
+    # metadata (stop_reason, content types, usage). The streaming
+    # partners in the DB are proxy artifacts and are not needed.
+    conversation_reqs = list(indexed_reqs)
 
     if len(conversation_reqs) < args.min_requests:
         return []
@@ -549,7 +536,8 @@ def process_conversation(conn, conversation_id: str, jsonl_path: Path, msg_id_ma
             continue
 
         salt = shared_hash_state.get('salt', '') if shared_hash_state else None
-        builder = MinimalTraceBuilder(args.block_size, shared_hash_state=shared_hash_state, salt=salt)
+        scope = "local" if getattr(args, 'local_hash_ids', False) else "global"
+        builder = MinimalTraceBuilder(args.block_size, shared_hash_state=shared_hash_state, salt=salt, hash_id_scope=scope)
 
         for req_id, ts_str, body_str, resp_str in segment:
             ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
@@ -792,72 +780,17 @@ def process_subagent(conn, agent_id: str, subagent_index: Dict[str, Dict],
     if not indexed_reqs:
         return None
 
-    indexed_ids = {r[0] for r in indexed_reqs}
-
-    # Get time range with buffer
-    first_ts = datetime.fromisoformat(indexed_reqs[0][1].replace('Z', '+00:00'))
-    last_ts = datetime.fromisoformat(indexed_reqs[-1][1].replace('Z', '+00:00'))
-    range_start = (first_ts - timedelta(seconds=300)).isoformat()
-    range_end = (last_ts + timedelta(seconds=300)).isoformat()
-
-    # Get ALL requests in time range to find streaming pairs
-    all_reqs = cursor.execute("""
-        SELECT id, timestamp, body, response
-        FROM requests
-        WHERE response IS NOT NULL
-          AND timestamp >= ?
-          AND timestamp <= ?
-        ORDER BY timestamp
-    """, (range_start, range_end)).fetchall()
-
-    # Extract tool/system/content hashes for matching
-    def extract_hashes(body_str: str) -> Tuple[str, str, str]:
-        body = json.loads(body_str)
-        tools = body.get('tools', [])
-        system = body.get('system', [])
-        messages = body.get('messages', [])
-        tool_hash = hashlib.md5(json.dumps(tools, separators=(',', ':')).encode()).hexdigest()[:16]
-        sys_hash = hashlib.md5(json.dumps(system, separators=(',', ':')).encode()).hexdigest()[:16]
-        msg_hash = hashlib.md5(json.dumps(messages, separators=(',', ':')).encode()).hexdigest()[:16]
-        return tool_hash, sys_hash, msg_hash
-
-    # Get hashes from indexed requests
-    indexed_info = []
-    for req_id, ts_str, body_str, resp_str in indexed_reqs:
-        tool_hash, sys_hash, msg_hash = extract_hashes(body_str)
-        indexed_info.append((req_id, ts_str, tool_hash, sys_hash, msg_hash))
-
-    # Find all sub-agent requests (indexed + streaming pairs)
-    subagent_reqs = []
-    for req_id, ts_str, body_str, resp_str in all_reqs:
-        ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-
-        if req_id in indexed_ids:
-            subagent_reqs.append((req_id, ts_str, body_str, resp_str))
-            continue
-
-        # Check if this is a streaming pair (must match content, not just tools/system)
-        tool_hash, sys_hash, msg_hash = extract_hashes(body_str)
-
-        for idx_id, idx_ts, idx_tool_hash, idx_sys_hash, idx_msg_hash in indexed_info:
-            idx_dt = datetime.fromisoformat(idx_ts.replace('Z', '+00:00'))
-            gap = abs((ts - idx_dt).total_seconds())
-
-            if gap < 30 and msg_hash == idx_msg_hash:
-                subagent_reqs.append((req_id, ts_str, body_str, resp_str))
-                break
-
-    if not subagent_reqs:
+    # Use indexed requests directly — same as parent conversation.
+    # JSONL message IDs point to non-streaming requests which have
+    # complete metadata. No need to find streaming pairs.
+    if not indexed_reqs:
         return None
-
-    # Sort by timestamp
-    subagent_reqs.sort(key=lambda x: x[1])
 
     # Build trace for sub-agent
     salt = shared_hash_state.get('salt', '') if shared_hash_state else None
     builder = MinimalTraceBuilder(args.block_size, shared_hash_state=shared_hash_state, salt=salt)
 
-    for req_id, ts_str, body_str, resp_str in subagent_reqs:
+    for req_id, ts_str, body_str, resp_str in indexed_reqs:
         ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
         req_type = classify_request(body_str)
         builder.process_request(ts, body_str, resp_str, req_type)
@@ -1076,6 +1009,8 @@ def main():
                         help='Include sub-agent traces nested inside parent traces')
     parser.add_argument('--anonymize', action='store_true', default=False,
                         help='Anonymize traces: replace IDs with sequential numbers, strip timestamps')
+    parser.add_argument('--local-hash-ids', action='store_true', default=False,
+                        help='Use per-conversation hash_ids instead of global (each conversation gets its own ID namespace)')
     args = parser.parse_args()
 
     jsonl_dir = Path(args.jsonl_dir)
@@ -1104,10 +1039,15 @@ def main():
         print(f"  Found {len(parent_links)} sub-agent links")
         print()
 
-    # Shared hash state across all conversations in this batch run
-    # Makes hash_ids globally consistent: same content = same ID
-    # Salt prevents reversing hashes to identify content in anonymized traces
-    shared_hash_state = {'hash_to_id': {}, 'next_id': 1, 'salt': secrets.token_hex(16)}
+    # Hash state for block ID assignment.
+    # Global (default): shared across all conversations — same content = same ID.
+    # Local (--local-hash-ids): each conversation gets its own ID namespace.
+    # Salt prevents reversing hashes to identify content in anonymized traces.
+    global_salt = secrets.token_hex(16)
+    if args.local_hash_ids:
+        shared_hash_state = None  # Each conversation will get its own state
+    else:
+        shared_hash_state = {'hash_to_id': {}, 'next_id': 1, 'salt': global_salt}
 
     # Find JSONL files (exclude agent-* files from main processing)
     jsonl_files = [f for f in jsonl_dir.glob("*.jsonl") if not f.name.startswith("agent-")]
@@ -1165,13 +1105,17 @@ def main():
 
         for jsonl_path in sorted(jsonl_files):
             conv_id = jsonl_path.stem
+            # For local hash_ids, create a fresh state per conversation
+            conv_hash_state = shared_hash_state
+            if args.local_hash_ids:
+                conv_hash_state = {'hash_to_id': {}, 'next_id': 1, 'salt': global_salt}
             if args.include_subagents:
                 traces = process_conversation_with_subagents(
                     conn, conv_id, jsonl_path, msg_id_map, args,
-                    subagent_index, parent_links, shared_hash_state=shared_hash_state
+                    subagent_index, parent_links, shared_hash_state=conv_hash_state
                 )
             else:
-                traces = process_conversation(conn, conv_id, jsonl_path, msg_id_map, args, shared_hash_state=shared_hash_state)
+                traces = process_conversation(conn, conv_id, jsonl_path, msg_id_map, args, shared_hash_state=conv_hash_state)
 
             if traces:
                 for trace in traces:

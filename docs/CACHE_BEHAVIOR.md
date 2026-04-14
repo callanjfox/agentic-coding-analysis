@@ -53,24 +53,6 @@ total_input = input_tokens + cache_read_input_tokens + cache_creation_input_toke
 - `cache_creation_input_tokens` — tokens added to cache this request
 - `input_tokens` — tokens that were neither cached nor created (typically ~9-12 per request)
 
-## Streaming / Non-Streaming Request Pairing
-
-Claude Code sends **two requests per tool call** with identical content:
-
-| Order | Type | max_tokens | stream | Purpose |
-|-------|------|-----------|--------|---------|
-| First | Streaming | 32000 | true | Real-time UI display |
-| Second | Non-streaming | 21333 | false | Tool execution (5-8s later) |
-
-### Cache Effect
-
-```
-Streaming:     input=9, cache_create=19339, cache_read=0     (creates cache)
-Non-streaming: input=9, cache_read=19339, cache_create=0     (reads cache, ~100% hit)
-```
-
-The non-streaming request is essentially free from a cache perspective — the streaming request already warmed the cache.
-
 ## How Prefix Caching Works
 
 Claude's cache is **prefix-based**: content is cached from the beginning of the request, and cache hits occur when the prefix of a new request matches a previously cached prefix.
@@ -164,8 +146,6 @@ From analysis of real Claude Code sessions:
 | Metric | Value |
 |--------|-------|
 | Overall cache hit rate | 85-90% |
-| Streaming-only hit rate | 70-83% |
-| Non-streaming hit rate | 97-99% |
-| Within-turn reuse | 100% |
-| Cross-conversation benefit | ~1.9pp |
+| Within-conversation prefix reuse | 93-99% |
+| Cross-conversation benefit (system/tools) | ~1.9pp |
 | Uncached overhead per request | ~9-12 tokens |

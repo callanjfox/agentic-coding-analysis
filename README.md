@@ -6,18 +6,19 @@ This project was created as part of my product management work at [WEKA](https:/
 
 Generates compact **trace files** that capture cache block patterns from real Claude Code sessions. These traces feed into [kv-cache-tester](https://github.com/callanjfox/kv-cache-tester) for replay testing against live infrastructure.
 
-## Key Discovery
+## Proxy Compatibility
 
-Claude Code sends **two requests per tool call**:
-- **Streaming** — for real-time UI display
-- **Non-streaming** — for tool execution, 5-8 seconds later
+The analysis tools work with data from both old and new versions of [claude-code-proxy](https://github.com/seifghazi/claude-code-proxy):
 
-Both have identical content. The non-streaming request gets ~100% cache hit from the streaming request's cache creation. This means half of all API traffic is essentially free.
+- **Fixed proxy** (after [seifghazi/claude-code-proxy#33](https://github.com/seifghazi/claude-code-proxy/pull/33)): The database contains one streaming request per turn with complete metadata. The tools process these directly via JSONL message ID linking.
+- **Older proxy**: A bug caused Claude Code to fire a non-streaming replay for every turn (the proxy stripped SSE headers, so Claude Code retried to recover metadata). Older databases contain paired streaming + non-streaming requests per turn. The tools use the non-streaming requests (which have complete `stop_reason`, content types, and usage data) and skip the streaming artifacts.
+
+No configuration needed — the tools detect which format they're working with automatically.
 
 ## Data Sources
 
 **Currently supported:** Two complementary sources used together:
-1. **`requests.db`** from [claude-code-proxy](https://github.com/seifghazi/claude-code-proxy) — a SQLite database capturing every API request/response body (both streaming and non-streaming)
+1. **`requests.db`** from [claude-code-proxy](https://github.com/seifghazi/claude-code-proxy) — a SQLite database capturing every API request/response body
 2. **JSONL conversation files** from Claude Code's local storage (`~/.claude/projects/`) — provides conversation structure and message ID linking
 
 See [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) for details on how these two sources work together.
@@ -30,18 +31,14 @@ The `examples/` directory contains a complete working example: one Claude Code c
 
 > *"Can you clone a version of vllm locally and then fully analyze its full code path and write me a markdown file about key components."*
 
-This single prompt generated **185 API requests** across 4 sub-agents in ~17 minutes, processing **7.7 million tokens** with a 93.3% cache hit rate.
+This single prompt generated **92 API requests** across 4 sub-agents in ~17 minutes, processing **~3.8 million tokens** with a high cache hit rate.
 
 | Metric | Value |
 |--------|-------|
-| Total requests | 185 |
-| Streaming / Non-streaming | 92 / 93 |
+| Total requests (streaming only) | 92 |
 | Models | claude-opus-4-6, claude-haiku-4-5 |
 | Duration | ~17 minutes |
 | Sub-agents spawned | 4 (Explore agents) |
-| Total tokens processed | 7.7M |
-| Cache hit rate | 93.3% |
-| Cache read tokens | 7.2M |
 
 See [docs/EXAMPLE_CONVERSATION.md](docs/EXAMPLE_CONVERSATION.md) for a detailed request-by-request walkthrough of this conversation — showing how the cache builds up, how sub-agents share their tool prefix, and why cache rates change at each phase.
 
@@ -159,7 +156,7 @@ python3 recover_conversations.py requests.db \
 | `validate_trace_cache.py` | Validate trace cache simulation against actual API metrics |
 | `recover_conversations.py` | Recover conversation structure from DB when JSONL missing |
 | `complete_cache_visualizer.py` | Cache analysis with interactive HTML charts (use `--text-only` for stats only) |
-| `complete_conversation_builder.py` | Build complete request timelines with streaming pair matching |
+| `complete_conversation_builder.py` | Build complete request timelines |
 | `build_message_index.py` | One-time setup: extract message IDs from responses |
 | `build_conversation_index.py` | One-time setup: link JSONL conversations to DB requests |
 | `list_conversations.py` | List available conversations in a database |
@@ -201,7 +198,7 @@ Key fields:
 - **`hash_id_scope`** — `"global"` means hash_ids are consistent across all conversations and sub-agents in a batch. Same content at the same position always gets the same ID, enabling cross-conversation cache simulation.
 - **`tool_tokens` / `system_tokens`** — Shared prefix (~15K tokens) that stays warm in API's global cache across sessions.
 - **`api_time`** — Total response time in seconds (from proxy's `responseTime`). How long the API took to respond.
-- **`ttft`** — Time to first token in seconds (from `Server-Timing` header). Only present on streaming requests, where it captures server-side latency before the first token. Omitted on non-streaming requests since TTFT equals `api_time`.
+- **`ttft`** — Time to first token in seconds (from `Server-Timing` header). Captures server-side latency before the first token.
 - **`think_time`** — Client delay before this request in seconds. The gap between the previous response completing and this request being sent. Captures tool execution time, user reading time, and sub-agent wait time.
 
 These timing fields allow the [trace replay tester](https://github.com/callanjfox/kv-cache-tester) to simulate different server speeds while preserving real client behavior. For example, `--timing-strategy api-scaled --api-time-scale 0.2` replays with a simulated 5x faster server but keeps real user/tool delays intact.
@@ -218,11 +215,15 @@ The salt prevents someone from tokenizing known content and confirming whether i
 
 Cache hits are prefix-based: if block N misses, all subsequent blocks also miss. This means cache hit rate is determined by the length of the matching prefix.
 
+### What the Simulation Does and Doesn't Cover
+
+The cache simulation models **within-conversation prefix reuse** — as each turn appends new messages, the shared prefix from previous turns produces cache hits. It does **not** simulate cross-conversation caching of tool definitions and system prompts. In the real API, these shared prefixes (~15K tokens) are almost always warm from other active Claude Code sessions, giving even the first request of a new conversation a high cache hit rate. Our simulation treats the first request as a cold start.
+
 ### Why ~1.9% Gap Between Simulation and API
 
-Three factors contribute to the gap between our simulated cache rate and the API's actual rate:
+Three factors contribute to the remaining gap:
 
-1. **Cross-conversation global cache** (~1-2pp) — The API has a global cache shared across all Claude Code sessions. Tool definitions (~12K tokens) and system prompt (~3K tokens) are always warm from other active sessions, so even the first request of a new conversation gets ~100% cache hit.
+1. **Cross-conversation global cache** (~1-2pp) — The API's global cache keeps tool definitions (~12K tokens) and system prompt (~3K tokens) warm across all active sessions. Our simulation only tracks cache within a single conversation.
 
 2. **Tokenizer differences** — We use tiktoken's GPT-4 tokenizer as an approximation. Claude's actual tokenizer produces slightly different token boundaries, which can cause minor mismatches in block alignment.
 
@@ -248,11 +249,9 @@ See [docs/REPLAY_INTEGRATION.md](docs/REPLAY_INTEGRATION.md) for details on conv
 
 | Metric | Value |
 |--------|-------|
-| Simulated cache hit rate (infinite TTL) | ~97.7% avg |
-| API actual cache hit rate | ~99.6% avg |
-| Gap (cross-conversation caching) | ~1.9pp |
-| Within-turn pair cache reuse | 100% |
-| Non-streaming cache hit rate | 97-99% |
+| Simulated cache hit rate (infinite TTL, within-conversation only) | ~97.7% avg |
+| API actual cache hit rate (includes cross-conversation system/tool caching) | ~99.6% avg |
+| Gap | ~1.9pp |
 
 ## Future Work
 

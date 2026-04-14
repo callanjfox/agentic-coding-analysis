@@ -1579,18 +1579,27 @@ def process_single_conversation(args, conversation_id: str, output_file: str):
             ORDER BY timestamp
         """)
 
-        sim = CompleteCacheSimulator(args.block_size, args.cache_ttl)
-        index = 0
-
+        # Collect all rows, then filter paired streaming requests
+        all_rows = []
         while True:
             row = cursor.fetchone()
             if row is None:
                 break
+            all_rows.append(row)
 
-            req_id, ts_str, body_str, resp_str = row
+        sim = CompleteCacheSimulator(args.block_size, args.cache_ttl)
+        index = 0
+
+        for req_id, ts_str, body_str, resp_str in all_rows:
+            req_type = classify_request(body_str)
+            # Skip streaming requests — they are proxy artifacts when
+            # a non-streaming pair exists, and have incomplete metadata.
+            # For DBs from a fixed proxy (streaming-only), this filter
+            # won't match and all requests pass through.
+            if req_type == 'streaming':
+                continue
             ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
             body = json.loads(body_str)
-            req_type = classify_request(body_str)
             msg_count = len(body.get('messages', []))
 
             sim.analyze(index, req_id, ts, body_str, resp_str, req_type, msg_count)
@@ -1689,9 +1698,12 @@ def process_single_conversation(args, conversation_id: str, output_file: str):
         sim = CompleteCacheSimulator(args.block_size, args.cache_ttl)
 
         for i, (req_id, ts_str, body_str, resp_str) in enumerate(conversation_reqs):
+            req_type = classify_request(body_str)
+            # Skip streaming requests — proxy artifacts with incomplete metadata
+            if req_type == 'streaming':
+                continue
             ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
             body = json.loads(body_str)
-            req_type = classify_request(body_str)
             msg_count = len(body.get('messages', []))
 
             sim.analyze(i, req_id, ts, body_str, resp_str, req_type, msg_count)

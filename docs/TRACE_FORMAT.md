@@ -57,7 +57,7 @@ warm_prefix_blocks = (trace['tool_tokens'] + trace['system_tokens']) // trace['b
 | Field | Type | Description |
 |-------|------|-------------|
 | `t` | float | Seconds from conversation start |
-| `type` | string | `"s"` = streaming, `"n"` = non-streaming, `"subagent"` = nested |
+| `type` | string | `"s"` = streaming, `"n"` = non-streaming, `"subagent"` = nested. Older proxy data produces `"n"` (non-streaming has complete metadata); fixed proxy data produces `"s"` |
 | `model` | string | Model ID for this request |
 | `in` | int | Input token count |
 | `out` | int | Output token count |
@@ -66,7 +66,7 @@ warm_prefix_blocks = (trace['tool_tokens'] + trace['system_tokens']) // trace['b
 | `output_types` | string[] | Content types in Claude's response |
 | `stop` | string | Stop reason: `""`, `"tool_use"`, `"end_turn"` |
 | `api_time` | float? | Total response time in seconds (from proxy `responseTime`) |
-| `ttft` | float? | Time to first token in seconds (from `Server-Timing` header). Only present on streaming requests (`type: "s"`), where it captures server-side latency before the first token. Omitted on non-streaming requests since TTFT equals `api_time` |
+| `ttft` | float? | Time to first token in seconds (from `Server-Timing` header). Captures server-side latency before the first token |
 | `think_time` | float? | Client delay before this request in seconds (gap since previous response completed) |
 
 ### input_types Values
@@ -76,9 +76,8 @@ Shows what the **client added** for this specific request (not cumulative):
 | Condition | input_types |
 |-----------|-------------|
 | First request | `["text"]` |
-| Within-turn pair (s→n) | `[]` |
-| Cross-turn after `tool_use` | `["tool_result"]` |
-| Cross-turn after `end_turn` | `["text"]` |
+| After `tool_use` stop | `["tool_result"]` |
+| After `end_turn` stop | `["text"]` |
 | Major context reset (<50% hash preserved) | Full content types from messages |
 
 ### output_types Values
@@ -121,23 +120,13 @@ Partial blocks (< block_size tokens) at the end are discarded because the last p
 
 Each block's hash includes the previous block's hash, which encodes **position**. This means identical content at different positions produces different hashes — matching real cache behavior where prefix position matters.
 
-## Request Pairing Pattern
-
-Every conversation turn produces **two requests** with identical `hash_ids`:
-
-1. **Streaming** (first): `max_tokens=32000, stream=true` — for UI responsiveness
-2. **Non-streaming** (5-8s later): `max_tokens=21333, stream=false` — for tool execution
-
-The non-streaming request gets ~100% cache hit from the streaming request's cache creation.
-
 ## Hash Evolution Patterns
 
 From real conversation data:
 
 | Pattern | Frequency | Description |
 |---------|-----------|-------------|
-| Identical (100% prefix) | 97.8% | Within-turn pairs (s→n) |
-| Suffix change (90-99%) | 0.5% | Normal growth + tokenization boundary effects |
+| Suffix growth (90-99% prefix match) | ~98% | Normal turn growth — new messages appended |
 | Major reset (<50%) | 1.7% | Context restructure or conversation restart |
 
 ### The "Last Chunk Different" Pattern

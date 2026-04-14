@@ -57,9 +57,14 @@ class ProcessedRequest:
 
 @dataclass
 class RequestPair:
-    """A streaming + non-streaming pair forming one turn"""
+    """A streaming request forming one turn, with optional non-streaming pair.
+
+    Non-streaming requests are proxy artifacts (the proxy's broken SSE
+    forwarding caused Claude Code to replay each turn). They may or may
+    not be present depending on the proxy version.
+    """
     streaming: ProcessedRequest
-    non_streaming: ProcessedRequest
+    non_streaming: Optional[ProcessedRequest] = None
     turn_number: int = 0
     conversation_id: str = ""
 
@@ -365,8 +370,14 @@ class ConversationRecoverer:
         return requests
 
     def pair_requests(self, requests: List[ProcessedRequest]) -> Tuple[List[RequestPair], List[ProcessedRequest]]:
-        """Pair streaming + non-streaming requests that form a single turn"""
-        print("Pairing streaming + non-streaming requests...")
+        """Create turn pairs anchored on streaming requests.
+
+        Non-streaming requests are proxy artifacts — they may or may not
+        exist depending on the proxy version. We anchor on streaming
+        requests and optionally attach a non-streaming partner if one
+        exists with matching content within 30 seconds.
+        """
+        print("Pairing requests (anchored on streaming)...")
 
         paired = []
         used = set()
@@ -374,42 +385,39 @@ class ConversationRecoverer:
         # Sort by timestamp
         sorted_reqs = sorted(requests, key=lambda r: r.timestamp)
 
-        # Build content_hash index for faster lookup
-        streaming_by_hash = defaultdict(list)
+        # Build content_hash index for non-streaming (artifact) lookup
+        non_streaming_by_hash = defaultdict(list)
         for req in sorted_reqs:
-            if req.req_type == 'streaming':
-                streaming_by_hash[req.content_hash].append(req)
+            if req.req_type == 'non_streaming':
+                non_streaming_by_hash[req.content_hash].append(req)
 
         for req in sorted_reqs:
-            if req.request_id in used or req.req_type != 'non_streaming':
+            if req.request_id in used or req.req_type != 'streaming':
                 continue
 
-            # Find streaming pair with same content hash
-            candidates = streaming_by_hash.get(req.content_hash, [])
-
-            best_pair = None
+            # Look for optional non-streaming partner (proxy artifact)
+            candidates = non_streaming_by_hash.get(req.content_hash, [])
+            best_partner = None
             best_gap = float('inf')
 
-            for stream_req in candidates:
-                if stream_req.request_id in used:
+            for ns_req in candidates:
+                if ns_req.request_id in used:
                     continue
-
-                gap = (req.timestamp - stream_req.timestamp).total_seconds()
-
-                # Streaming should come before non-streaming, within 30 seconds
+                gap = (ns_req.timestamp - req.timestamp).total_seconds()
+                # Non-streaming should come after streaming, within 30 seconds
                 if 0 < gap <= 30 and gap < best_gap:
-                    best_pair = stream_req
+                    best_partner = ns_req
                     best_gap = gap
 
-            if best_pair:
-                pair = RequestPair(streaming=best_pair, non_streaming=req)
-                paired.append(pair)
-                used.add(best_pair.request_id)
-                used.add(req.request_id)
+            pair = RequestPair(streaming=req, non_streaming=best_partner)
+            paired.append(pair)
+            used.add(req.request_id)
+            if best_partner:
+                used.add(best_partner.request_id)
 
         orphans = [r for r in sorted_reqs if r.request_id not in used]
 
-        print(f"  Created {len(paired)} pairs")
+        print(f"  Created {len(paired)} pairs ({sum(1 for p in paired if p.non_streaming)} with non-streaming artifact)")
         print(f"  Orphans: {len(orphans)}")
 
         return paired, orphans
@@ -446,7 +454,8 @@ class ConversationRecoverer:
         # Assign results to pairs
         for i, pair in enumerate(pairs):
             pair.streaming.hash_ids = results[i]
-            pair.non_streaming.hash_ids = results[i]
+            if pair.non_streaming:
+                pair.non_streaming.hash_ids = results[i]
 
         print(f"  Done computing hashes", flush=True)
 
@@ -601,19 +610,25 @@ class ConversationRecoverer:
 
             with open(jsonl_path, 'w') as f:
                 for pair in conv.pairs:
-                    # Use non-streaming message ID (that's what real JSONL has)
-                    msg_id = pair.non_streaming.message_id
+                    # Prefer non-streaming message ID if available (older
+                    # proxy data), fall back to streaming
+                    msg_id = None
+                    if pair.non_streaming:
+                        msg_id = pair.non_streaming.message_id
                     if not msg_id:
                         msg_id = pair.streaming.message_id
+
+                    # Use non-streaming timestamp/msg_count if available
+                    ref = pair.non_streaming or pair.streaming
 
                     if msg_id:
                         entry = {
                             "type": "assistant",
                             "message": {"id": msg_id},
-                            "timestamp": pair.non_streaming.timestamp.isoformat(),
+                            "timestamp": ref.timestamp.isoformat(),
                             "_recovered": True,  # Mark as recovered
                             "_turn": pair.turn_number,
-                            "_msg_count": pair.non_streaming.msg_count
+                            "_msg_count": ref.msg_count
                         }
                         f.write(json.dumps(entry) + '\n')
 
@@ -663,8 +678,13 @@ class ConversationRecoverer:
             # Get message IDs in this recovered conversation
             msg_ids = []
             for pair in conv.pairs:
-                if pair.non_streaming.message_id:
-                    msg_ids.append(pair.non_streaming.message_id)
+                msg_id = None
+                if pair.non_streaming:
+                    msg_id = pair.non_streaming.message_id
+                if not msg_id:
+                    msg_id = pair.streaming.message_id
+                if msg_id:
+                    msg_ids.append(msg_id)
 
             if not msg_ids:
                 continue
